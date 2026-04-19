@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import os
 import csv
 import json
+import requests
 
 st.set_page_config(
     page_title="Utpal Trading Dashboard",
@@ -44,11 +45,17 @@ div[data-testid="stMetricValue"] { color: #d1d4dc; font-size: 22px; font-weight:
 .risk-high { background: rgba(239,83,80,0.15); border: 1px solid #ef5350; border-radius: 6px; padding: 10px 14px; }
 .risk-med  { background: rgba(245,200,66,0.10); border: 1px solid #f5c842; border-radius: 6px; padding: 10px 14px; }
 .risk-low  { background: rgba(38,166,154,0.10); border: 1px solid #26a69a; border-radius: 6px; padding: 10px 14px; }
+.data-panel { background: #1a1e2e; border: 1px solid #2a2e3e; border-radius: 8px; padding: 14px 18px; margin-bottom: 12px; }
+.regime-bull { background: rgba(38,166,154,0.12); border: 1px solid #26a69a; border-radius: 6px; padding: 8px 14px; display:inline-block; margin:4px; }
+.regime-bear { background: rgba(239,83,80,0.12); border: 1px solid #ef5350; border-radius: 6px; padding: 8px 14px; display:inline-block; margin:4px; }
+.regime-chop { background: rgba(245,200,66,0.10); border: 1px solid #f5c842; border-radius: 6px; padding: 8px 14px; display:inline-block; margin:4px; }
+.ticker-btn button { background: transparent !important; border: 1px solid #363a45 !important; color: #2962ff !important; font-weight: bold !important; padding: 2px 8px !important; font-size:12px !important; }
+.ai-box { background: #1a1e2e; border: 1px solid #2962ff; border-radius: 8px; padding: 16px; margin-top: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────
-# PORTFOLIO CONFIG — uses .NE tickers (NEO Exchange Canada)
+# PORTFOLIO CONFIG
 # ─────────────────────────────────────────
 DEFAULT_PORTFOLIO = {
     "AVGO.NE": {"shares": 1005, "avg_cost": 13.4353, "currency": "CAD", "target": 20.0},
@@ -66,6 +73,142 @@ JOURNAL_COLS = [
     "size", "thesis", "timeframe", "alignment_score", "catalyst_state",
     "options_setup", "result", "pnl", "notes", "mistakes"
 ]
+
+# ─────────────────────────────────────────
+# OPENROUTER INTEGRATION
+# ─────────────────────────────────────────
+def get_openrouter_key():
+    try:
+        return st.secrets.get("OPENROUTER_API_KEY")
+    except Exception:
+        return None
+
+def generate_ai_commentary(payload, provider="none", model="openrouter/auto"):
+    """
+    Generate AI commentary. Falls back to Python-generated summary if provider=none or on failure.
+    NEVER logs or prints the API key.
+    """
+    if provider == "none":
+        return _python_summary(payload)
+
+    api_key = get_openrouter_key()
+    if not api_key:
+        return _python_summary(payload), "⚠️ AI commentary unavailable — OPENROUTER_API_KEY not set in secrets."
+
+    prompt = f"""You are a professional trading analyst. Analyze this trading setup and respond in structured format.
+
+Setup Data:
+- Ticker: {payload.get('ticker')}
+- Price: ${payload.get('price', 0):.2f}
+- Trend Bias: {payload.get('trend_bias')}
+- RSI: {payload.get('rsi', 0):.1f}
+- Alignment Score: {payload.get('alignment_score')}/100
+- Primary MTF Bias: {payload.get('primary_bias')}
+- Event Risk: {payload.get('event_risk')}
+- Options Vehicle: {payload.get('options_vehicle')}
+- Entry Zone: ${payload.get('entry_low', 0):.2f} – ${payload.get('entry_high', 0):.2f}
+- Stop: ${payload.get('stop_loss', 0):.2f}
+- Target 1: ${payload.get('target_1', 0):.2f}
+- Target 2: ${payload.get('target_2', 0):.2f}
+- R:R: {payload.get('rr', 0):.2f}x
+- IV: {payload.get('iv', 'N/A')}
+- Sentiment: {payload.get('sentiment_label')} ({payload.get('sentiment_score')}/100)
+- ATR%: {payload.get('atr_pct', 0):.2f}%
+- Overall Score: {payload.get('overall_score')}/5
+- Key Support: ${payload.get('support', 0):.2f}
+- Key Resistance: ${payload.get('resistance', 0):.2f}
+
+Respond ONLY with these 6 numbered sections, concisely:
+1. Setup Summary: 2 sentence overview
+2. Why This Signal: data-driven reason
+3. What to Watch Next: 2 key catalysts or price levels
+4. Best Vehicle: specific recommendation with brief reasoning
+5. Invalidation Level: exact price and why
+6. Discipline Note: 1 actionable mindset reminder
+"""
+
+    try:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://utpal-trading-dashboard.streamlit.app",
+            "X-Title": "Utpal Trading Dashboard",
+        }
+        body = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 600,
+        }
+        resp = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json=body,
+            timeout=20
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return data["choices"][0]["message"]["content"], None
+        else:
+            fallback = _python_summary(payload)
+            return fallback, f"⚠️ OpenRouter returned {resp.status_code}. Showing Python summary."
+    except Exception as e:
+        fallback = _python_summary(payload)
+        return fallback, f"⚠️ OpenRouter call failed: {str(e)[:80]}. Showing Python summary."
+
+def _python_summary(payload):
+    """Pure Python-generated fallback commentary."""
+    lines = []
+    ticker    = payload.get("ticker", "?")
+    trend     = payload.get("trend_bias", "Neutral")
+    rsi       = payload.get("rsi", 50)
+    score     = payload.get("overall_score", 3)
+    entry_lo  = payload.get("entry_low", 0)
+    entry_hi  = payload.get("entry_high", 0)
+    stop      = payload.get("stop_loss", 0)
+    t1        = payload.get("target_1", 0)
+    t2        = payload.get("target_2", 0)
+    rr        = payload.get("rr", 0)
+    event     = payload.get("event_risk", "Low")
+    vehicle   = payload.get("options_vehicle", "Wait")
+    support   = payload.get("support", 0)
+    resist    = payload.get("resistance", 0)
+    align     = payload.get("alignment_score", 50)
+    atr_pct   = payload.get("atr_pct", 2)
+
+    lines.append(f"**1. Setup Summary:** {ticker} has a {score}/5 overall score with a **{trend}** bias. "
+                 f"Multi-timeframe alignment is {align}/100.")
+
+    if trend == "Bullish":
+        lines.append(f"**2. Why This Signal:** Price is above key EMAs with RSI at {rsi:.0f} (healthy range). "
+                     f"Supertrend is bullish and MACD leans positive.")
+    elif trend == "Bearish":
+        lines.append(f"**2. Why This Signal:** Price is below key moving averages with RSI at {rsi:.0f}. "
+                     f"Downward momentum is confirmed by Supertrend direction.")
+    else:
+        lines.append(f"**2. Why This Signal:** Mixed signals across timeframes — no dominant trend. "
+                     f"RSI at {rsi:.0f} is neutral. Wait for resolution.")
+
+    lines.append(f"**3. What to Watch Next:** Price reaction at ${support:.2f} support and ${resist:.2f} resistance. "
+                 f"Monitor RSI for overbought/oversold extremes.")
+
+    lines.append(f"**4. Best Vehicle:** {vehicle} — Entry ${entry_lo:.2f}–${entry_hi:.2f}, "
+                 f"Stop ${stop:.2f}, T1 ${t1:.2f}, T2 ${t2:.2f}, R:R {rr:.1f}x.")
+
+    if event == "High":
+        lines.append(f"**5. Invalidation Level:** Avoid — earnings risk is HIGH. "
+                     f"Any position invalidated below ${stop:.2f}.")
+    else:
+        lines.append(f"**5. Invalidation Level:** Trade is invalid below ${stop:.2f}. "
+                     f"A close below this level means the thesis is broken — exit without hesitation.")
+
+    if atr_pct > 3:
+        lines.append(f"**6. Discipline Note:** High ATR ({atr_pct:.1f}%) means wide swings are normal. "
+                     f"Size down and honor your stop — don't let volatility override your plan.")
+    else:
+        lines.append(f"**6. Discipline Note:** Define your exit BEFORE you enter. "
+                     f"If price reaches ${stop:.2f}, exit — no averaging down.")
+
+    return "\n\n".join(lines)
 
 # ─────────────────────────────────────────
 # INDICATOR FUNCTIONS
@@ -157,10 +300,11 @@ INTERVAL_MAP = {
 def get_stock_data(ticker, interval="1d"):
     try:
         period = INTERVAL_MAP.get(interval, "2y")
+        fetch_time = datetime.now()
         stock  = yf.Ticker(ticker)
         df     = stock.history(period=period, interval=interval, auto_adjust=False)
         if df.empty:
-            return None, None, f"No data for {ticker}"
+            return None, None, f"No data for {ticker}", None
         df = df.dropna().copy()
         df["EMA9"]    = ema(df["Close"], 9)
         df["EMA20"]   = ema(df["Close"], 20)
@@ -176,16 +320,19 @@ def get_stock_data(ticker, interval="1d"):
             info = stock.info
         except Exception:
             info = {}
-        return df, info, None
+        meta = {
+            "fetch_time": fetch_time,
+            "last_candle": df.index[-1],
+            "bar_count": len(df),
+            "interval": interval,
+            "source": "Yahoo Finance",
+        }
+        return df, info, None, meta
     except Exception as e:
-        return None, None, str(e)
+        return None, None, str(e), None
 
-# ─────────────────────────────────────────
-# PORTFOLIO TICKER PRICE — uses the exact ticker (e.g. AVGO.NE)
-# ─────────────────────────────────────────
 @st.cache_data(ttl=300)
 def get_portfolio_price(ticker):
-    """Fetch current price using the EXACT ticker symbol provided."""
     try:
         stock = yf.Ticker(ticker)
         df = stock.history(period="5d", interval="1d", auto_adjust=False)
@@ -194,6 +341,120 @@ def get_portfolio_price(ticker):
     except Exception:
         pass
     return None
+
+# ─────────────────────────────────────────
+# DATA INTEGRITY PANEL
+# ─────────────────────────────────────────
+def render_data_integrity_panel(meta, ticker, interval):
+    if meta is None:
+        st.warning("⚠️ Data integrity info unavailable.")
+        return
+
+    now = datetime.now()
+    fetch_time = meta.get("fetch_time", now)
+    last_candle = meta.get("last_candle")
+
+    # Bar age
+    if last_candle is not None:
+        try:
+            lc = pd.Timestamp(last_candle)
+            if lc.tzinfo is not None:
+                lc = lc.tz_localize(None)
+            bar_age_min = int((now - lc).total_seconds() / 60)
+        except Exception:
+            bar_age_min = None
+    else:
+        bar_age_min = None
+
+    # Market status
+    market_open = now.weekday() < 5 and 9 <= now.hour < 16
+    market_status = "🟢 Market Open" if market_open else "🔴 Market Closed"
+
+    # Feed type
+    if bar_age_min is not None and bar_age_min < 20:
+        feed_type = "🔄 Near-Realtime"
+    elif bar_age_min is not None and bar_age_min < 60:
+        feed_type = "⏱ Delayed"
+    else:
+        feed_type = "📦 Historical"
+
+    st.markdown('<div class="data-panel">', unsafe_allow_html=True)
+    st.markdown("**⚙️ Data Integrity Panel**")
+    d1, d2, d3, d4, d5, d6, d7, d8 = st.columns(8)
+    d1.metric("Source", meta.get("source", "Yahoo Finance"))
+    d2.metric("Interval", interval)
+    d3.metric("Fetched", fetch_time.strftime("%H:%M:%S"))
+    d4.metric("Last Candle", str(last_candle)[:16] if last_candle else "N/A")
+    d5.metric("Bar Age", f"{bar_age_min}m" if bar_age_min is not None else "N/A")
+    d6.metric("Bar Count", meta.get("bar_count", "N/A"))
+    d7.metric("Market", market_status)
+    d8.metric("Feed", feed_type)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ─────────────────────────────────────────
+# MARKET REGIME PANEL
+# ─────────────────────────────────────────
+@st.cache_data(ttl=600)
+def get_market_regime():
+    result = {"SPY": "Unknown", "QQQ": "Unknown", "VIX": None, "regime": "Unknown"}
+    for sym in ["SPY", "QQQ"]:
+        try:
+            df_r = yf.Ticker(sym).history(period="60d", interval="1d", auto_adjust=False)
+            if df_r is not None and not df_r.empty:
+                price = float(df_r["Close"].iloc[-1])
+                ema20_val = float(df_r["Close"].ewm(span=20, adjust=False).mean().iloc[-1])
+                ema50_val = float(df_r["Close"].ewm(span=50, adjust=False).mean().iloc[-1])
+                if price > ema20_val and price > ema50_val:
+                    result[sym] = "Bullish"
+                elif price < ema20_val and price < ema50_val:
+                    result[sym] = "Bearish"
+                else:
+                    result[sym] = "Chop"
+        except Exception:
+            pass
+
+    try:
+        df_vix = yf.Ticker("^VIX").history(period="5d", interval="1d", auto_adjust=False)
+        if df_vix is not None and not df_vix.empty:
+            result["VIX"] = float(df_vix["Close"].iloc[-1])
+    except Exception:
+        pass
+
+    spy = result["SPY"]
+    qqq = result["QQQ"]
+    vix = result["VIX"]
+
+    if spy == "Bullish" and qqq == "Bullish":
+        if vix and vix > 30:
+            result["regime"] = "Risk-off"
+        else:
+            result["regime"] = "Bullish"
+    elif spy == "Bearish" and qqq == "Bearish":
+        result["regime"] = "Bearish"
+    elif vix and vix > 30:
+        result["regime"] = "Risk-off"
+    else:
+        result["regime"] = "Chop"
+
+    return result
+
+def render_market_regime():
+    regime = get_market_regime()
+    st.markdown("### 🌐 Market Regime")
+    r1, r2, r3, r4 = st.columns(4)
+
+    def regime_color(val):
+        if val == "Bullish": return "#26a69a"
+        if val == "Bearish": return "#ef5350"
+        if val == "Risk-off": return "#ef5350"
+        return "#f5c842"
+
+    r1.metric("SPY", regime["SPY"])
+    r2.metric("QQQ", regime["QQQ"])
+    r3.metric("VIX", f"{regime['VIX']:.1f}" if regime["VIX"] else "N/A",
+              "High Volatility" if regime["VIX"] and regime["VIX"] > 25 else ("Normal" if regime["VIX"] else ""))
+    color = regime_color(regime["regime"])
+    r4.markdown(f"**Overall Regime:**<br><span style='color:{color};font-size:18px;font-weight:bold'>{regime['regime']}</span>", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────
 # NEWS + SENTIMENT
@@ -241,7 +502,6 @@ def get_levels(df):
 # ─────────────────────────────────────────
 @st.cache_data(ttl=3600)
 def get_catalyst_data(ticker):
-    """Fetch earnings date, ex-div date, analyst target from yfinance."""
     result = {
         "earnings_date": None,
         "days_to_earnings": None,
@@ -256,7 +516,6 @@ def get_catalyst_data(ticker):
         cal   = stock.calendar
         info  = stock.info or {}
 
-        # Earnings date
         if cal is not None and not cal.empty:
             try:
                 if hasattr(cal, "columns") and "Earnings Date" in cal.columns:
@@ -287,7 +546,6 @@ def get_catalyst_data(ticker):
             except Exception:
                 pass
 
-        # Ex-dividend date
         try:
             ex_div = info.get("exDividendDate")
             if ex_div:
@@ -295,7 +553,6 @@ def get_catalyst_data(ticker):
         except Exception:
             pass
 
-        # Analyst target
         result["analyst_target"] = info.get("targetMeanPrice")
 
     except Exception:
@@ -307,7 +564,6 @@ def get_catalyst_data(ticker):
 # ─────────────────────────────────────────
 @st.cache_data(ttl=1800)
 def get_options_data(ticker):
-    """Fetch IV and options metadata; fail gracefully."""
     result = {
         "iv": None, "iv_rank": None, "next_exp": None,
         "has_options": False, "error": None,
@@ -330,55 +586,52 @@ def get_options_data(ticker):
     return result
 
 def options_recommendation(trend_bias, event_risk, iv, rsi_val, atr_pct):
-    """Return a recommended options vehicle based on available data."""
     if event_risk == "High":
-        return "⚠️ Avoid / Wait", "Earnings within 5 days. IV is inflated — selling premium might work but direction unpredictable. Best to wait until after the event."
+        return "⚠️ Avoid / Wait", "Earnings within 5 days. IV is inflated — direction unpredictable. Best to wait until after the event."
 
     if iv is None:
-        # No IV data — fallback to stock recommendation
         if trend_bias == "Bullish" and rsi_val < 65:
-            return "📈 Stock Only / Calls", "No IV data available. Trend is bullish and RSI not extended — stock long or ATM calls acceptable."
+            return "📈 Stock Only / Calls", "No IV data available. Trend bullish, RSI healthy — stock long or ATM calls acceptable."
         elif trend_bias == "Bearish":
-            return "📉 Puts / Stock Short", "No IV data available. Trend is bearish — puts or short stock are directionally aligned."
+            return "📉 Puts / Stock Short", "No IV data available. Trend bearish — puts or short stock aligned."
         else:
-            return "⏳ Wait", "Trend is mixed and IV data unavailable. Insufficient data to recommend a vehicle."
+            return "⏳ Wait", "Trend mixed and IV data unavailable. Insufficient data to recommend a vehicle."
 
     if iv > 60 and event_risk in ("Low", "Moderate"):
         if trend_bias == "Bullish":
-            return "🐂 Bull Call Spread", f"IV at {iv:.1f}% is elevated. Spread caps premium paid while expressing bullish view. Better than naked calls here."
+            return "🐂 Bull Call Spread", f"IV at {iv:.1f}% is elevated. Spread caps premium paid while expressing bullish view."
         elif trend_bias == "Bearish":
-            return "🐻 Bear Put Spread", f"IV at {iv:.1f}% is elevated. Spread reduces premium cost for a bearish bet."
+            return "🐻 Bear Put Spread", f"IV at {iv:.1f}% is elevated. Spread reduces premium cost for bearish bet."
         else:
-            return "⏳ Wait", f"IV elevated ({iv:.1f}%) but trend is unclear. Not enough directional conviction to trade options."
+            return "⏳ Wait", f"IV elevated ({iv:.1f}%) but trend unclear. Not enough conviction to trade options."
 
     if iv <= 30:
         if trend_bias == "Bullish" and rsi_val < 65:
-            return "📈 Calls (ATM/Slight ITM)", f"Low IV ({iv:.1f}%) — options are cheap. ATM calls give good leverage on a bullish move."
+            return "📈 Calls (ATM/Slight ITM)", f"Low IV ({iv:.1f}%) — options cheap. ATM calls give good leverage on bullish move."
         elif trend_bias == "Bearish":
-            return "📉 Puts (ATM)", f"Low IV ({iv:.1f}%) — puts are relatively cheap. Favourable for directional bearish bets."
+            return "📉 Puts (ATM)", f"Low IV ({iv:.1f}%) — puts relatively cheap. Favourable for directional bearish bets."
 
     if trend_bias == "Bullish" and rsi_val < 65 and atr_pct < 3:
-        return "📈 Calls", f"Moderate IV ({iv:.1f}%), bullish trend, RSI healthy. Calls aligned with trend."
+        return "📈 Calls", f"Moderate IV ({iv:.1f}%), bullish trend, RSI healthy."
     elif trend_bias == "Bearish" and rsi_val > 35:
-        return "📉 Puts", f"Moderate IV ({iv:.1f}%), bearish trend. Puts aligned."
+        return "📉 Puts", f"Moderate IV ({iv:.1f}%), bearish trend."
     elif atr_pct > 4:
-        return "🔄 Stock Only", f"High volatility ({atr_pct:.1f}% ATR) makes options expensive relative to move needed. Stock preferred."
+        return "🔄 Stock Only", f"High volatility ({atr_pct:.1f}% ATR) makes options expensive. Stock preferred."
 
     return "⏳ Wait", "Signals not clear enough for a high-conviction options setup."
 
 # ─────────────────────────────────────────
-# MULTI-TIMEFRAME CONFIRMATION
+# MULTI-TIMEFRAME ENGINE
 # ─────────────────────────────────────────
 @st.cache_data(ttl=300)
 def get_mtf_data(ticker):
-    """Build signals across 6 timeframes and produce alignment score."""
     timeframes = ["1m", "5m", "15m", "1h", "4h", "1d"]
     rows = []
     bullish_count = 0
     total_tfs = 0
 
     for tf in timeframes:
-        df_tf, _, err = get_stock_data(ticker, tf)
+        df_tf, _, err, _ = get_stock_data(ticker, tf)
         if err or df_tf is None or len(df_tf) < 20:
             rows.append({"TF": tf, "Trend": "—", "EMA9": "—", "EMA20": "—",
                          "RSI": "—", "MACD": "—", "ST": "—", "Verdict": "⬜ No Data"})
@@ -449,7 +702,7 @@ def get_mtf_data(ticker):
         conflict_note  = "Watch for 1d RSI if overbought"
     elif align_score >= 55:
         primary_bias   = "Mild Bullish"
-        confirmation   = "Short timeframes lean bull, higher TFs mixed"
+        confirmation   = "Short TFs lean bull, higher TFs mixed"
         trigger        = "Wait for 1h close above EMA20 before entry"
         conflict_note  = "Some TF conflict — size down, tighter stop"
     elif align_score >= 45:
@@ -478,6 +731,59 @@ def get_mtf_data(ticker):
     }
 
 # ─────────────────────────────────────────
+# WATCHLIST NOTE GENERATOR
+# ─────────────────────────────────────────
+def generate_watchlist_note(ticker, df_w, catalyst_days, rsi_w, st_dir_w, trend_w, align_score=None):
+    """Generate a human-readable note explaining the watchlist signal."""
+    price_w  = float(df_w.iloc[-1]["Close"])
+    ema20_w  = float(df_w.iloc[-1]["EMA20"]) if "EMA20" in df_w.columns else price_w
+    ema50_w  = float(df_w.iloc[-1].get("EMA50", price_w))
+    macd_val = float(df_w.iloc[-1]["MACD"]) if "MACD" in df_w.columns else 0
+    macd_sig = float(df_w.iloc[-1]["MACD_Signal"]) if "MACD_Signal" in df_w.columns else 0
+
+    parts = []
+
+    # Earnings risk
+    if catalyst_days is not None and catalyst_days <= 5:
+        return f"⚠️ Avoid: earnings in {catalyst_days} days — high event risk"
+    elif catalyst_days is not None and catalyst_days <= 14:
+        parts.append(f"earnings in {catalyst_days}d")
+
+    # Trend
+    if st_dir_w == "up" and price_w > ema20_w and rsi_w < 65:
+        label = "Bullish"
+        parts.append(f"price > EMA20 (${ema20_w:.2f})")
+        parts.append(f"RSI {rsi_w:.0f}")
+        parts.append("Supertrend bullish")
+        if catalyst_days and catalyst_days > 14:
+            parts.append("no earnings risk")
+    elif st_dir_w == "down" and price_w < ema20_w:
+        label = "Bearish"
+        parts.append(f"price < EMA20 (${ema20_w:.2f})")
+        parts.append(f"RSI {rsi_w:.0f}")
+        parts.append("Supertrend bearish")
+    elif price_w > ema20_w and st_dir_w == "down":
+        label = "Wait"
+        parts.append("lower TF bullish but Supertrend still down")
+    elif rsi_w > 70:
+        label = "Wait"
+        parts.append(f"RSI overbought at {rsi_w:.0f}")
+    elif rsi_w < 30:
+        label = "Oversold"
+        parts.append(f"RSI oversold at {rsi_w:.0f} — watch for bounce")
+    else:
+        label = "Neutral"
+        parts.append("mixed signals")
+
+    if macd_val > macd_sig:
+        parts.append("MACD ▲")
+    else:
+        parts.append("MACD ▼")
+
+    note = f"{label}: " + ", ".join(parts)
+    return note[:120]
+
+# ─────────────────────────────────────────
 # POSITION SIZING CALCULATOR
 # ─────────────────────────────────────────
 def calc_position_size(account_size, cash_avail, risk_pct, entry, stop, target1, target2, asset_type, atr_val=None):
@@ -489,7 +795,7 @@ def calc_position_size(account_size, cash_avail, risk_pct, entry, stop, target1,
     units            = max_risk_dollars / risk_per_unit if risk_per_unit > 0 else 0
 
     if asset_type == "Option":
-        units = int(units / 100)  # 1 contract = 100 shares
+        units = int(units / 100)
         if units < 1:
             units = 1
         pos_value = units * 100 * entry
@@ -510,9 +816,16 @@ def calc_position_size(account_size, cash_avail, risk_pct, entry, stop, target1,
         if atr_pct_stop < 0.5:
             warnings.append(f"⚠️ Stop is very tight ({atr_pct_stop:.1f}x ATR). High chance of stop-out on normal noise.")
         elif atr_pct_stop > 3:
-            warnings.append(f"⚠️ Stop is wide ({atr_pct_stop:.1f}x ATR). Risk per trade may be acceptable but position value is small.")
+            warnings.append(f"⚠️ Stop is wide ({atr_pct_stop:.1f}x ATR). Position value will be small.")
     if rr1 > 0 and rr1 < 1.5:
-        warnings.append(f"⚠️ R:R to Target 1 is only {rr1:.2f}x — below the minimum 1.5x threshold.")
+        warnings.append(f"⚠️ R:R to Target 1 is only {rr1:.2f}x — below 1.5x minimum. Consider a better entry or wider target.")
+
+    explanations = [
+        f"📘 **Max $ Risk** = Account ${account_size:,.0f} × {risk_pct}% = ${max_risk_dollars:,.2f} — the most you'll lose if stopped out.",
+        f"📘 **Risk/Unit** = Entry ${entry:.2f} − Stop ${stop:.2f} = ${risk_per_unit:.2f} per share.",
+        f"📘 **Position Size** = ${max_risk_dollars:.2f} ÷ ${risk_per_unit:.2f} = {units} {label_unit} (capped by available cash).",
+        f"📘 **R:R to T1** = (${target1:.2f} − ${entry:.2f}) ÷ ${risk_per_unit:.2f} = {rr1:.2f}x. Aim for ≥ 2x for strong trades.",
+    ]
 
     return {
         "max_risk_dollars": max_risk_dollars,
@@ -522,6 +835,7 @@ def calc_position_size(account_size, cash_avail, risk_pct, entry, stop, target1,
         "risk_per_unit": risk_per_unit,
         "rr1": rr1,
         "rr2": rr2,
+        "explanations": explanations,
     }, "\n".join(warnings) if warnings else None
 
 # ─────────────────────────────────────────
@@ -568,16 +882,14 @@ def journal_analytics(df):
     expectancy = (win_rate / 100 * avg_win) + ((1 - win_rate / 100) * avg_loss)
 
     insights = []
-    # Earnings proximity insight
     near_earn = df[df["catalyst_state"].str.contains("High", na=False)]
     far_earn  = df[~df["catalyst_state"].str.contains("High", na=False)]
     if len(near_earn) >= 2 and len(far_earn) >= 2:
         wr_near = len(near_earn[near_earn["result"].str.lower() == "win"]) / len(near_earn) * 100
         wr_far  = len(far_earn[far_earn["result"].str.lower() == "win"]) / len(far_earn) * 100
         if wr_near < wr_far - 10:
-            insights.append(f"📉 Win rate drops near earnings: {wr_near:.0f}% (near earnings) vs {wr_far:.0f}% (normal). Avoid trading high-risk earnings windows.")
+            insights.append(f"📉 Win rate drops near earnings: {wr_near:.0f}% vs {wr_far:.0f}% normally. Avoid high-risk earnings windows.")
 
-    # Alignment score insight
     high_align = df[df["alignment_score"] >= 70]
     low_align  = df[df["alignment_score"] < 50]
     if len(high_align) >= 2 and len(low_align) >= 2:
@@ -586,6 +898,13 @@ def journal_analytics(df):
         if wr_h > wr_l + 10:
             insights.append(f"✅ Trades with alignment ≥70 win {wr_h:.0f}% vs {wr_l:.0f}% for <50. Prioritize high-alignment setups.")
 
+    # Best trades insight
+    if "timeframe" in df.columns:
+        tf_wins = df[df["result"].str.lower() == "win"].groupby("timeframe").size()
+        if not tf_wins.empty:
+            best_tf = tf_wins.idxmax()
+            insights.append(f"🕐 Most wins come from the **{best_tf}** timeframe. Focus there.")
+
     return {
         "total": total, "win_rate": win_rate, "avg_win": avg_win,
         "avg_loss": avg_loss, "total_pnl": total_pnl,
@@ -593,7 +912,7 @@ def journal_analytics(df):
     }
 
 # ─────────────────────────────────────────
-# 6-PILLAR ANALYSIS
+# UTILITY FUNCTIONS
 # ─────────────────────────────────────────
 def fmt_large(n):
     if n is None: return "N/A"
@@ -602,6 +921,14 @@ def fmt_large(n):
     if n >= 1e6:  return f"${n/1e6:.2f}M"
     return f"${n:,.0f}"
 
+def score_badge(score):
+    if score >= 4: return "strong", "🟢 Strong"
+    if score >= 3: return "avg",    "🟡 Average"
+    return "weak", "🔴 Weak"
+
+# ─────────────────────────────────────────
+# 6-PILLAR ANALYSIS
+# ─────────────────────────────────────────
 def analyze(df, info, ticker, sentiment_score):
     latest  = df.iloc[-1]
     price   = float(latest["Close"])
@@ -669,7 +996,7 @@ def analyze(df, info, ticker, sentiment_score):
         lbl = "✅" if nm > 15 else ("⚠️" if nm < 0 else "")
         fund_details.append(f"Net Margin: **{nm:.1f}%** {lbl}")
         if nm < 0:
-            fund_issues.append(f"Company is losing money (net margin {nm:.1f}%)")
+            fund_issues.append(f"Company losing money (net margin {nm:.1f}%)")
             fund_score -= 1
     if pe is not None:
         lbl = "elevated" if pe > 40 else ("reasonable" if pe < 20 else "moderate")
@@ -683,7 +1010,7 @@ def analyze(df, info, ticker, sentiment_score):
         lbl = "✅ cheap vs growth" if peg < 1.5 else ("⚠️ expensive vs growth" if peg > 3 else "fair")
         fund_details.append(f"PEG: **{peg:.2f}** ({lbl})")
         if peg > 3:
-            fund_issues.append(f"PEG of {peg:.2f} means you're paying a lot for expected growth")
+            fund_issues.append(f"PEG of {peg:.2f} means paying a lot for expected growth")
     if eps is not None:
         fund_details.append(f"EPS (TTM): **${eps:.2f}**")
     if cash is not None and debt is not None:
@@ -733,20 +1060,20 @@ def analyze(df, info, ticker, sentiment_score):
         tech_details.append("✅ **Perfect bull stack**: Price > EMA9 > EMA20 > EMA50 > EMA200. Supertrend UP.")
     elif price > ema20 and price > ema50 and price > ema200:
         tech_score = 4; trend_bias = "Bullish"
-        tech_details.append("✅ **Bullish**: Price above all key MAs. Not full perfect stack.")
+        tech_details.append("✅ **Bullish**: Price above all key MAs.")
     elif bearish_stack:
         tech_score = 1; trend_bias = "Bearish"
         tech_issues.append("Price below EMA9 < EMA20 < EMA50 < EMA200. Supertrend DOWN.")
     elif price < ema50 and price < ema200:
         tech_score = 2; trend_bias = "Bearish"
-        tech_issues.append(f"Price ${price:.2f} is below EMA50 (${ema50:.2f}) and EMA200 (${ema200:.2f})")
+        tech_issues.append(f"Price ${price:.2f} below EMA50 (${ema50:.2f}) and EMA200 (${ema200:.2f})")
 
     if rsi_val > 70:
         tech_details.append(f"⚠️ **RSI {rsi_val:.1f} is overbought** — short-term pullback risk")
     elif rsi_val < 30:
         tech_details.append(f"⚠️ **RSI {rsi_val:.1f} is oversold** — potential bounce zone")
     else:
-        tech_details.append(f"✅ RSI {rsi_val:.1f} is in healthy range")
+        tech_details.append(f"✅ RSI {rsi_val:.1f} in healthy range")
 
     if macd_v > macd_s:
         tech_details.append("✅ MACD above signal — bullish momentum")
@@ -804,16 +1131,16 @@ def analyze(df, info, ticker, sentiment_score):
     # ── PILLAR 4: TRADING PLAN ────────────────────────────────
     if trend_bias == "Bullish" and sentiment_score >= 50:
         plan_score   = 4
-        plan_summary = f"Bullish trend + positive sentiment ({sentiment_score}/100) = constructive setup. Buy pullbacks to EMA20 (${ema20:.2f}) or EMA50 (${ema50:.2f}). Hold while Supertrend is UP and price stays above EMA50."
+        plan_summary = f"Bullish trend + positive sentiment ({sentiment_score}/100). Buy pullbacks to EMA20 (${ema20:.2f}) or EMA50 (${ema50:.2f}). Hold while Supertrend UP and price stays above EMA50."
     elif trend_bias == "Bullish":
         plan_score   = 3
-        plan_summary = f"Trend is bullish but sentiment is mixed ({sentiment_score}/100). Wait for pullbacks. EMA20 (${ema20:.2f}) is key support to watch."
+        plan_summary = f"Trend bullish but sentiment mixed ({sentiment_score}/100). Wait for pullbacks. EMA20 (${ema20:.2f}) is key support."
     elif trend_bias == "Bearish":
         plan_score   = 2
-        plan_summary = f"Bearish trend (price below EMA50 ${ema50:.2f}). Avoid longs unless price reclaims EMA50. Better to wait for structure shift."
+        plan_summary = f"Bearish trend (price below EMA50 ${ema50:.2f}). Avoid longs unless price reclaims EMA50. Wait for structure shift."
     else:
         plan_score   = 3
-        plan_summary = f"Mixed signals — price is between key MAs. EMA50 (${ema50:.2f}) and EMA200 (${ema200:.2f}) are the critical levels to watch for confirmation."
+        plan_summary = f"Mixed signals. EMA50 (${ema50:.2f}) and EMA200 (${ema200:.2f}) are critical levels to watch for confirmation."
 
     # ── PILLAR 5: ENTRY / EXIT ────────────────────────────────
     entry_low    = min(ema20, ema50) if trend_bias == "Bullish" else min(ema50, ema200)
@@ -825,6 +1152,28 @@ def analyze(df, info, ticker, sentiment_score):
     reward_1     = target_1 - price
     rr_1         = reward_1 / risk_per_sh if risk_per_sh > 0 else 0
 
+    # Check if price is extended or near support
+    dist_to_support = (price - s20) / price * 100
+    dist_to_resist  = (r20 - price) / price * 100
+    if dist_to_support < 2:
+        position_status = "Near support — potential entry zone"
+        suggested_action = "pullback entry"
+    elif dist_to_resist < 2:
+        position_status = "Near resistance — price may be extended"
+        suggested_action = "wait for breakout confirmation"
+    elif bb_pos > 80:
+        position_status = "Upper Bollinger Band — extended"
+        suggested_action = "wait for pullback"
+    elif bb_pos < 20:
+        position_status = "Lower Bollinger Band — oversold zone"
+        suggested_action = "watch for bounce entry"
+    elif trend_bias == "Bullish" and rsi_val < 60:
+        position_status = "Mid-range with bullish bias"
+        suggested_action = "breakout entry or pullback entry"
+    else:
+        position_status = "No clear extreme"
+        suggested_action = "wait"
+
     ee_score   = 4 if trend_bias == "Bullish" else 3
     ee_details = [
         f"Entry Zone: **${entry_low:.2f} — ${entry_high:.2f}**",
@@ -833,6 +1182,8 @@ def analyze(df, info, ticker, sentiment_score):
         f"Target 2: **${target_2:.2f}** ({((target_2-price)/price*100):.1f}% upside) | R:R = **{(target_2-price)/risk_per_sh:.1f}x**",
         f"Support 20-day: **${s20:.2f}** | Resistance 20-day: **${r20:.2f}**",
         f"Support 50-day: **${s50:.2f}** | Resistance 50-day: **${r50:.2f}**",
+        f"Position Status: **{position_status}**",
+        f"Suggested Action: **{suggested_action}**",
     ]
     ee_summary  = "\n".join(f"- {d}" for d in ee_details)
     ee_why_weak = "" if ee_score >= 3 else "R:R below 1.5x — not ideal entry conditions."
@@ -840,7 +1191,7 @@ def analyze(df, info, ticker, sentiment_score):
     # ── PILLAR 6: MINDSET ─────────────────────────────────────
     if vol >= 0.025:
         mind_score   = 3
-        mind_summary = f"High volatility ({vol_pct:.2f}%/day) amplifies emotional mistakes. Rules: reduce size, honor your stop at ${stop_loss:.2f}, don't average down impulsively. ATR of ${atr_val:.2f} means normal daily swings will feel painful — plan for them."
+        mind_summary = f"High volatility ({vol_pct:.2f}%/day) amplifies emotional mistakes. Rules: reduce size, honor stop at ${stop_loss:.2f}, don't average down. ATR of ${atr_val:.2f} means normal daily swings will feel painful — plan for them."
     else:
         mind_score   = 4
         mind_summary = f"Stable trend reduces emotional pressure. Main risk is overconfidence — avoid chasing above ${r20:.2f} resistance. Always define your exit BEFORE entering."
@@ -866,34 +1217,13 @@ def analyze(df, info, ticker, sentiment_score):
         "scores": scores, "overall_score": overall,
         "levels": (s20, s50, s200, r20, r50, r200),
         "market_cap": market_cap, "sector": sector,
+        "position_status": position_status, "suggested_action": suggested_action,
+        "ema9": ema9, "ema20": ema20, "ema50": ema50, "ema200": ema200,
+        "vwap": vwap_v, "bb_pos": bb_pos,
     }
 
 # ─────────────────────────────────────────
-# AI COMMENTARY
-# ─────────────────────────────────────────
-def ai_commentary(ticker, a, sent_label, sent_score):
-    lines = []
-    if a["overall_score"] >= 4:
-        lines.append(f"**{ticker}** has a strong combined profile ({a['overall_score']:.1f}/5). Multiple pillars aligned.")
-    elif a["overall_score"] >= 3:
-        lines.append(f"**{ticker}** has a mixed setup ({a['overall_score']:.1f}/5). Trade with confirmation, not conviction.")
-    else:
-        lines.append(f"**{ticker}** has a weak combined setup ({a['overall_score']:.1f}/5). Capital preservation > aggressive positioning.")
-
-    if a["trend_bias"] == "Bullish":
-        lines.append(f"Trend is **BULLISH**. Buy pullbacks to ${a['entry_low']:.2f}–${a['entry_high']:.2f}. Don't chase extended candles.")
-    elif a["trend_bias"] == "Bearish":
-        lines.append(f"Trend is **BEARISH**. Avoid longs unless price reclaims EMA50. Wait for structure shift.")
-    else:
-        lines.append("Trend is **NEUTRAL**. Wait for clearer directional confirmation.")
-
-    lines.append(f"Sentiment: **{sent_label}** ({sent_score}/100). Use as context, not your main signal.")
-    lines.append(f"Support: **${a['support_watch']:.2f}** | Resistance: **${a['resistance_watch']:.2f}**")
-    lines.append(f"Entry: **${a['entry_low']:.2f}–${a['entry_high']:.2f}** | Stop: **${a['stop_loss']:.2f}** | T1: **${a['target_1']:.2f}** | T2: **${a['target_2']:.2f}** | R:R: **{a['rr']:.1f}x**")
-    return lines
-
-# ─────────────────────────────────────────
-# CHART — TradingView-style (unchanged)
+# CHART — TradingView-style
 # ─────────────────────────────────────────
 def build_chart(df, ticker, show_bb=True, show_vwap=True, show_st=True, show_ema=True, show_macd=False, range_days=None):
     if range_days:
@@ -1003,17 +1333,9 @@ def build_chart(df, ticker, show_bb=True, show_vwap=True, show_st=True, show_ema
         fig.update_yaxes(title_text="", row=3, col=1)
     return fig
 
-# ─────────────────────────────────────────
-# SCORE BADGE
-# ─────────────────────────────────────────
-def score_badge(score):
-    if score >= 4: return "strong", "🟢 Strong"
-    if score >= 3: return "avg",    "🟡 Average"
-    return "weak", "🔴 Weak"
-
-# ─────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
 # SIDEBAR NAVIGATION
-# ─────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
 with st.sidebar:
     st.markdown("### 📊 Trading Desk")
     page = st.radio("Navigate", [
@@ -1023,27 +1345,47 @@ with st.sidebar:
         "📓 Journal",
     ], label_visibility="collapsed")
     st.divider()
+
+    # ── AI Provider Settings ──────────────────────────────────
+    st.markdown("**🤖 AI Settings**")
+    ai_provider = st.selectbox("AI Provider", ["none", "openrouter"], key="ai_provider")
+    ai_model    = st.text_input("Model", value="openrouter/auto", key="ai_model")
+    ai_enabled  = st.toggle("Enable AI Comments", value=True, key="ai_enabled")
+
+    api_key_present = get_openrouter_key() is not None
+    if ai_provider == "openrouter" and not api_key_present:
+        st.warning("⚠️ OPENROUTER_API_KEY not found in secrets. AI disabled.")
+    elif ai_provider == "openrouter" and api_key_present:
+        st.success("✅ API key loaded from secrets")
+
+    st.divider()
     st.markdown("**Quick Access**")
     quick_tickers = ["AVGO", "META", "NVDA", "AMD", "AMZN"]
     for qt in quick_tickers:
         if st.button(qt, key=f"quick_{qt}", use_container_width=True):
             st.session_state["ticker_input"] = qt
+            st.session_state["page_override"] = "📈 Chart & Analysis"
     st.divider()
     st.caption("Data: Yahoo Finance · Refresh every 5 min")
+
+# Handle page override from watchlist click
+if "page_override" in st.session_state:
+    page = st.session_state.pop("page_override")
 
 # ═══════════════════════════════════════════════════════════════
 # PAGE 1: CHART & ANALYSIS
 # ═══════════════════════════════════════════════════════════════
 if "📈" in page:
+    # ── Row 1: Ticker + price ─────────────────────────────────
     st.markdown("## 📈 Chart & Analysis")
 
-    c1, c2, c3 = st.columns([3, 1, 1])
-    with c1:
+    row1_c1, row1_c2, row1_c3 = st.columns([3, 1, 1])
+    with row1_c1:
         default_tick = st.session_state.get("ticker_input", "AVGO")
         ticker = st.text_input("Ticker", value=default_tick, placeholder="e.g. AVGO, META, NVDA").strip().upper()
-    with c2:
+    with row1_c2:
         interval = st.selectbox("Interval", ["1m","5m","15m","1h","4h","1d","1wk"], index=5)
-    with c3:
+    with row1_c3:
         st.markdown("<br>", unsafe_allow_html=True)
         run = st.button("▶ Load", use_container_width=True)
 
@@ -1051,7 +1393,7 @@ if "📈" in page:
         st.info("Enter a ticker symbol above.")
         st.stop()
 
-    df, info, error = get_stock_data(ticker, interval)
+    df, info, error, meta = get_stock_data(ticker, interval)
     if error or df is None:
         st.error(f"Could not load data for **{ticker}**: {error}")
         st.stop()
@@ -1059,7 +1401,6 @@ if "📈" in page:
     news         = get_news(ticker)
     sent_score, sent_label = calculate_sentiment(news)
     a            = analyze(df, info or {}, ticker, sent_score)
-    ai           = ai_commentary(ticker, a, sent_label, sent_score)
     catalyst     = get_catalyst_data(ticker)
     opt_data     = get_options_data(ticker)
     mtf          = get_mtf_data(ticker)
@@ -1069,7 +1410,10 @@ if "📈" in page:
     chg          = latest_close - prev_close
     chg_pct      = chg / prev_close * 100 if prev_close else 0
 
-    # ── Header Metrics ────────────────────────────────────────
+    # ── DATA INTEGRITY PANEL ──────────────────────────────────
+    render_data_integrity_panel(meta, ticker, interval)
+
+    # ── Header Metrics Row ────────────────────────────────────
     m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("Ticker",    ticker)
     m2.metric("Price",     f"${latest_close:.2f}", f"{chg:+.2f} ({chg_pct:+.2f}%)")
@@ -1077,6 +1421,11 @@ if "📈" in page:
     m4.metric("Trend",     a["trend_bias"])
     m5.metric("Score",     f"{a['overall_score']}/5")
     m6.metric("Sentiment", f"{sent_score}/100 {sent_label}")
+
+    st.divider()
+
+    # ── MARKET REGIME ─────────────────────────────────────────
+    render_market_regime()
 
     st.divider()
 
@@ -1108,7 +1457,8 @@ if "📈" in page:
 
     st.divider()
 
-    # ── Chart Controls ────────────────────────────────────────
+    # ── Row 2: Timeframe indicator toggles ────────────────────
+    st.markdown("**Chart Indicators**")
     cc1, cc2, cc3, cc4, cc5 = st.columns(5)
     with cc1: show_ema  = st.checkbox("EMAs",       value=True)
     with cc2: show_bb   = st.checkbox("Bollinger",  value=False)
@@ -1116,7 +1466,7 @@ if "📈" in page:
     with cc4: show_st   = st.checkbox("Supertrend", value=True)
     with cc5: show_macd = st.checkbox("MACD Panel", value=False)
 
-    st.caption("💡 Scroll to zoom · Drag to pan · 1M/3M/1Y buttons top-left · Double-click to reset")
+    st.caption("💡 Scroll to zoom · Drag to pan · Use 1M/3M/1Y buttons on chart · Double-click to reset")
 
     fig = build_chart(df, ticker, show_bb, show_vwap, show_st, show_ema, show_macd)
     st.plotly_chart(fig, use_container_width=True, config={
@@ -1128,6 +1478,38 @@ if "📈" in page:
 
     st.divider()
 
+    # ── SUGGESTIONS & TRADE PLAN ──────────────────────────────
+    st.markdown("### 📌 Suggestions & Trade Plan")
+    s20, s50, s200, r20, r50, r200 = a["levels"]
+
+    tp1, tp2 = st.columns(2)
+    with tp1:
+        st.markdown("**Key Levels**")
+        st.markdown(f"""
+| Level | Price |
+|---|---|
+| Support 20d | ${s20:.2f} |
+| Support 50d | ${s50:.2f} |
+| Support 200d | ${s200:.2f} |
+| Resistance 20d | ${r20:.2f} |
+| Resistance 50d | ${r50:.2f} |
+| Resistance 200d | ${r200:.2f} |
+""")
+    with tp2:
+        st.markdown("**Suggested Trade Plan**")
+        action_color = "#26a69a" if "breakout" in a["suggested_action"] or "pullback" in a["suggested_action"] else "#f5c842"
+        st.markdown(f"""
+- **Position Status:** {a['position_status']}
+- **Suggested Action:** <span style='color:{action_color};font-weight:bold'>{a['suggested_action'].upper()}</span>
+- **Entry Zone:** ${a['entry_low']:.2f} – ${a['entry_high']:.2f}
+- **Stop Loss:** ${a['stop_loss']:.2f}
+- **Target 1:** ${a['target_1']:.2f} (R:R {a['rr']:.1f}x)
+- **Target 2:** ${a['target_2']:.2f}
+- **Reason:** {a['trend_bias']} trend, RSI {a['rsi']:.0f}, Supertrend {'UP' if df.iloc[-1]['SupertrendDir'] == 'up' else 'DOWN'}, event risk {catalyst['event_risk']}
+""", unsafe_allow_html=True)
+
+    st.divider()
+
     # ── MULTI-TIMEFRAME CONFIRMATION ──────────────────────────
     st.markdown("### 🕐 Multi-Timeframe Confirmation")
 
@@ -1136,10 +1518,10 @@ if "📈" in page:
     st.markdown(f"**Alignment Score:** <span style='color:{align_color};font-size:22px;font-weight:bold'>{align}/100</span>", unsafe_allow_html=True)
 
     mta, mtb, mtc, mtd = st.columns(4)
-    mta.metric("Primary Bias",    mtf["primary_bias"])
-    mtb.metric("Confirmation",    mtf["confirmation"][:35] + "…" if len(mtf["confirmation"]) > 35 else mtf["confirmation"])
-    mtc.metric("Execution Trigger", mtf["trigger"][:35] + "…" if len(mtf["trigger"]) > 35 else mtf["trigger"])
-    mtd.metric("Conflict Note",   mtf["conflict_note"][:35] + "…" if len(mtf["conflict_note"]) > 35 else mtf["conflict_note"])
+    mta.metric("Primary Bias",      mtf["primary_bias"])
+    mtb.metric("Confirmation",      mtf["confirmation"][:40] + "…" if len(mtf["confirmation"]) > 40 else mtf["confirmation"])
+    mtc.metric("Execution Trigger", mtf["trigger"][:40] + "…" if len(mtf["trigger"]) > 40 else mtf["trigger"])
+    mtd.metric("Conflict Note",     mtf["conflict_note"][:40] + "…" if len(mtf["conflict_note"]) > 40 else mtf["conflict_note"])
 
     with st.expander("📋 Full Multi-Timeframe Table", expanded=False):
         mtf_df = pd.DataFrame(mtf["rows"])
@@ -1158,8 +1540,8 @@ if "📈" in page:
 
     oa, ob, oc, od = st.columns(4)
     oa.metric("Recommendation", opt_vehicle)
-    oc.metric("IV (Median)",    f"{opt_data['iv']:.1f}%" if opt_data.get("iv") else "N/A")
     ob.metric("Next Expiry",    opt_data.get("next_exp") or "N/A")
+    oc.metric("IV (Median)",    f"{opt_data['iv']:.1f}%" if opt_data.get("iv") else "N/A")
     od.metric("Event Risk",     catalyst["event_risk"])
 
     st.info(f"**Reasoning:** {opt_reason}")
@@ -1169,21 +1551,73 @@ if "📈" in page:
 
     st.divider()
 
-    # ── AI Comments + News ────────────────────────────────────
-    col_ai, col_news = st.columns([1, 1])
+    # ── AI COMMENTS (OpenRouter) ──────────────────────────────
+    st.markdown("### 🤖 AI Comments")
 
-    with col_ai:
-        st.markdown("### 🤖 AI Summary")
+    ai_payload = {
+        "ticker":          ticker,
+        "price":           a["price"],
+        "trend_bias":      a["trend_bias"],
+        "rsi":             a["rsi"],
+        "alignment_score": mtf["alignment_score"],
+        "primary_bias":    mtf["primary_bias"],
+        "event_risk":      catalyst["event_risk"],
+        "options_vehicle": opt_vehicle,
+        "entry_low":       a["entry_low"],
+        "entry_high":      a["entry_high"],
+        "stop_loss":       a["stop_loss"],
+        "target_1":        a["target_1"],
+        "target_2":        a["target_2"],
+        "rr":              a["rr"],
+        "iv":              opt_data.get("iv"),
+        "sentiment_label": sent_label,
+        "sentiment_score": sent_score,
+        "atr_pct":         a["atr_pct"],
+        "overall_score":   a["overall_score"],
+        "support":         a["support_watch"],
+        "resistance":      a["resistance_watch"],
+    }
+
+    effective_provider = st.session_state.get("ai_provider", "none")
+    if not st.session_state.get("ai_enabled", True):
+        effective_provider = "none"
+
+    if st.button("🤖 Generate AI Comments", key="gen_ai"):
+        with st.spinner("Generating analysis..."):
+            commentary, ai_warn = generate_ai_commentary(
+                ai_payload,
+                provider=effective_provider,
+                model=st.session_state.get("ai_model", "openrouter/auto")
+            )
+        if isinstance(commentary, tuple):
+            commentary, ai_warn = commentary
+
+        if ai_warn:
+            st.warning(ai_warn)
+
+        st.markdown('<div class="ai-box">', unsafe_allow_html=True)
+        st.markdown(commentary)
+        st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        if effective_provider == "none":
+            st.caption("Using Python-generated analysis (AI provider set to 'none'). Click the button to generate.")
+        else:
+            st.caption("Click the button above to generate AI commentary via OpenRouter.")
+
+    st.divider()
+
+    # ── NEWS ──────────────────────────────────────────────────
+    col_sent, col_news = st.columns([1, 1])
+
+    with col_sent:
+        st.markdown("### 📊 Sentiment")
         sent_color = "#26a69a" if sent_label == "Bullish" else ("#ef5350" if sent_label == "Bearish" else "#f5c842")
         st.progress(sent_score / 100)
         st.markdown(f"<span style='color:{sent_color};font-weight:bold'>Sentiment: {sent_label} ({sent_score}/100)</span>", unsafe_allow_html=True)
-        st.markdown("")
-        for line in ai:
-            st.markdown(f"▸ {line}")
 
     with col_news:
         st.markdown("### 📰 Latest News")
-        for item in news[:6]:
+        for item in news[:5]:
             with st.container(border=True):
                 st.markdown(f"**{item['title']}**")
                 if item["published"]:
@@ -1192,7 +1626,7 @@ if "📈" in page:
 
     st.divider()
 
-    # ── RISK CALCULATOR ───────────────────────────────────────
+    # ── RISK CALCULATOR (ENHANCED) ────────────────────────────
     st.markdown("### 💰 Risk Calculator")
     with st.expander("Open Position Sizer", expanded=False):
         rca, rcb = st.columns(2)
@@ -1225,6 +1659,11 @@ if "📈" in page:
                 p6.metric("R:R → T2",      f"{result['rr2']:.2f}x")
                 if warning:
                     st.warning(warning)
+
+                st.markdown("**📘 What these numbers mean:**")
+                for exp in result["explanations"]:
+                    st.markdown(exp)
+
                 st.session_state["last_position_calc"] = {
                     "ticker": ticker, "entry": rc_entry, "stop": rc_stop,
                     "target1": rc_t1, "target2": rc_t2, "size": result["units"],
@@ -1274,7 +1713,7 @@ if "📈" in page:
 
     st.divider()
 
-    # ── SAVE TO JOURNAL BUTTON ────────────────────────────────
+    # ── SAVE TO JOURNAL ───────────────────────────────────────
     st.markdown("### 💾 Save Setup to Journal")
     with st.expander("Save this setup as a trade entry", expanded=False):
         j1, j2 = st.columns(2)
@@ -1312,7 +1751,7 @@ if "📈" in page:
                 "mistakes":        j_mistakes,
             }
             save_trade(trade_row)
-            st.success(f"✅ Trade saved to journal: {ticker} {j_direction} on {trade_row['date']}")
+            st.success(f"✅ Trade saved: {ticker} {j_direction} on {trade_row['date']}")
 
 # ═══════════════════════════════════════════════════════════════
 # PAGE 2: PORTFOLIO
@@ -1320,13 +1759,11 @@ if "📈" in page:
 elif "💼" in page:
     st.markdown("## 💼 Portfolio")
 
-    # Initialize portfolio in session state (persists until page refresh)
     if "portfolio" not in st.session_state:
         st.session_state["portfolio"] = DEFAULT_PORTFOLIO.copy()
 
     portfolio = st.session_state["portfolio"]
 
-    # Add / Update position
     with st.expander("➕ Add / Update Position"):
         pa, pb, pc, pd_col, pe = st.columns(5)
         with pa:   new_ticker = st.text_input("Ticker (exact, e.g. AVGO.NE)", key="new_tick").strip().upper()
@@ -1342,7 +1779,6 @@ elif "💼" in page:
             st.success(f"Saved {new_ticker}")
             st.rerun()
 
-    # Remove position
     if portfolio:
         remove_tick = st.selectbox("Remove Position", ["—"] + list(portfolio.keys()))
         if st.button("Remove") and remove_tick != "—":
@@ -1352,14 +1788,13 @@ elif "💼" in page:
 
     st.divider()
     st.markdown("### Current Positions")
-    st.caption("Prices are fetched using the exact ticker you saved (e.g. AVGO.NE pulls from the NEO Exchange).")
+    st.caption("Prices fetched using exact ticker (e.g. AVGO.NE → NEO Exchange).")
 
     total_invested = 0
     total_value    = 0
     rows           = []
 
     for tick, pos in st.session_state["portfolio"].items():
-        # Use exact ticker for price — no stripping of exchange suffix
         cur_price = get_portfolio_price(tick)
         if cur_price is None:
             cur_price = pos["avg_cost"]
@@ -1428,10 +1863,13 @@ elif "👁️" in page:
 
     st.divider()
     st.markdown("### Live Scan")
+    st.caption("Click any ticker name to open it in Chart & Analysis.")
 
     wl_rows = []
+    wl_catalyst_cache = {}
+
     for tick in st.session_state["watchlist"]:
-        df_w, info_w, _ = get_stock_data(tick, "1d")
+        df_w, info_w, _, _ = get_stock_data(tick, "1d")
         if df_w is None or df_w.empty:
             continue
         latest_w = df_w.iloc[-1]
@@ -1443,6 +1881,16 @@ elif "👁️" in page:
         trend_w  = "▲ Bull" if price_w > float(latest_w.get("EMA50", price_w)) else "▼ Bear"
         signal_w = "🟢 BUY" if (st_dir_w == "up" and rsi_w < 65) else ("🔴 SELL" if st_dir_w == "down" else "🟡 WAIT")
 
+        # Catalyst check (fast — reuse cached)
+        try:
+            cat_w = get_catalyst_data(tick)
+            days_earn = cat_w.get("days_to_earnings")
+        except Exception:
+            days_earn = None
+
+        # Generate note
+        note_w = generate_watchlist_note(tick, df_w, days_earn, rsi_w, st_dir_w, trend_w)
+
         wl_rows.append({
             "Ticker": tick,
             "Price":  f"${price_w:.2f}",
@@ -1451,10 +1899,33 @@ elif "👁️" in page:
             "Trend":  trend_w,
             "ST Dir": st_dir_w.upper(),
             "Signal": signal_w,
+            "Note":   note_w,
         })
 
     if wl_rows:
-        st.dataframe(pd.DataFrame(wl_rows), use_container_width=True, hide_index=True)
+        # Display with clickable tickers using buttons
+        st.markdown("**Click a ticker to analyze it in Chart & Analysis:**")
+        header_cols = st.columns([1, 1, 1, 1, 1, 1, 1, 3])
+        for i, hdr in enumerate(["Ticker", "Price", "Chg%", "RSI", "Trend", "ST Dir", "Signal", "Note"]):
+            header_cols[i].markdown(f"**{hdr}**")
+
+        for row in wl_rows:
+            c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([1, 1, 1, 1, 1, 1, 1, 3])
+            with c1:
+                if st.button(row["Ticker"], key=f"wl_tick_{row['Ticker']}"):
+                    st.session_state["ticker_input"] = row["Ticker"]
+                    st.session_state["page_override"] = "📈 Chart & Analysis"
+                    st.rerun()
+            c2.write(row["Price"])
+            # Color chg
+            chg_val = float(row["Chg%"].replace("%","").replace("+",""))
+            chg_color = "#26a69a" if chg_val >= 0 else "#ef5350"
+            c3.markdown(f"<span style='color:{chg_color}'>{row['Chg%']}</span>", unsafe_allow_html=True)
+            c4.write(row["RSI"])
+            c5.write(row["Trend"])
+            c6.write(row["ST Dir"])
+            c7.write(row["Signal"])
+            c8.write(row["Note"])
     else:
         st.info("Loading watchlist data...")
 
@@ -1467,7 +1938,6 @@ elif "📓" in page:
     journal_df = load_journal()
     analytics  = journal_analytics(journal_df)
 
-    # ── Analytics Summary ─────────────────────────────────────
     if analytics:
         st.markdown("### 📊 Performance Analytics")
         ja1, ja2, ja3, ja4 = st.columns(4)
@@ -1486,9 +1956,9 @@ elif "📓" in page:
             for insight in analytics["insights"]:
                 st.info(insight)
 
-        # P&L chart
         if not journal_df.empty and "pnl" in journal_df.columns:
             pnl_series = pd.to_numeric(journal_df["pnl"], errors="coerce").fillna(0)
+            cum_pnl    = pnl_series.cumsum()
             if pnl_series.sum() != 0:
                 fig_pnl = go.Figure()
                 fig_pnl.add_trace(go.Bar(
@@ -1497,17 +1967,25 @@ elif "📓" in page:
                     marker_color=["#26a69a" if v >= 0 else "#ef5350" for v in pnl_series],
                     name="P&L per Trade"
                 ))
+                fig_pnl.add_trace(go.Scatter(
+                    x=list(range(1, len(cum_pnl)+1)),
+                    y=cum_pnl.tolist(),
+                    mode="lines+markers",
+                    name="Cumulative P&L",
+                    line=dict(color="#2962ff", width=2),
+                    yaxis="y2"
+                ))
                 fig_pnl.update_layout(
                     template="plotly_dark", plot_bgcolor="#131722", paper_bgcolor="#131722",
-                    height=250, margin=dict(l=10,r=10,t=30,b=10),
-                    title="P&L per Trade",
+                    height=280, margin=dict(l=10,r=10,t=30,b=10),
+                    title="P&L per Trade + Cumulative",
                     font=dict(color="#d1d4dc"),
+                    yaxis2=dict(overlaying="y", side="right"),
                 )
                 st.plotly_chart(fig_pnl, use_container_width=True)
 
         st.divider()
 
-    # ── Add New Trade ─────────────────────────────────────────
     st.markdown("### ➕ Log New Trade")
     with st.expander("Open Trade Entry Form", expanded=not analytics):
         f1, f2 = st.columns(2)
@@ -1549,18 +2027,15 @@ elif "📓" in page:
 
     st.divider()
 
-    # ── Trade Log Table ───────────────────────────────────────
     st.markdown("### 📋 Trade Log")
     if journal_df.empty:
         st.info("No trades logged yet. Use the form above or the 'Save to Journal' button on the Chart page.")
     else:
         st.dataframe(journal_df, use_container_width=True, hide_index=True)
-        # Download
         csv_str = journal_df.to_csv(index=False)
         st.download_button("⬇ Download Journal CSV", data=csv_str,
                            file_name="trade_journal.csv", mime="text/csv")
 
-        # Delete last trade
         if st.button("🗑 Delete Last Trade", key="del_last"):
             if not journal_df.empty:
                 journal_df = journal_df.iloc[:-1]
