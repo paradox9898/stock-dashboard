@@ -1,209 +1,319 @@
-# AI Stock Intelligence Dashboard (Advanced - Free Data Stack)
-# Streamlit App
-# ------------------------------------------------------------
-# Features:
-# - Live stock data (yfinance)
-# - Technical indicators (EMA, RSI, VWAP)
-# - News (Yahoo RSS / yfinance)
-# - Reddit sentiment (praw)
-# - 6-Pillar Trading Analysis Engine
-# - Fully free data sources
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import requests
 import feedparser
-from datetime import datetime
 
-# Optional (sentiment / reddit)
-try:
-    import praw
-except:
-    praw = None
-
-# -----------------------------
-# CONFIG
-# -----------------------------
 st.set_page_config(page_title="AI Stock Dashboard", layout="wide")
 
 # -----------------------------
 # INDICATORS
 # -----------------------------
-
 def ema(series, period):
     return series.ewm(span=period, adjust=False).mean()
 
-
 def rsi(series, period=14):
     delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    gain = delta.where(delta > 0, 0).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-
 def vwap(df):
-    return (df['Close'] * df['Volume']).cumsum() / df['Volume'].cumsum()
+    volume_sum = df["Volume"].cumsum()
+    price_volume_sum = (df["Close"] * df["Volume"]).cumsum()
+    return price_volume_sum / volume_sum
 
 # -----------------------------
 # DATA FETCH
 # -----------------------------
-
+@st.cache_data(ttl=900)
 def get_stock_data(ticker):
-    stock = yf.Ticker(ticker)
-    df = stock.history(period="6mo", interval="1d")
-    df.dropna(inplace=True)
+    try:
+        stock = yf.Ticker(ticker)
+        df = stock.history(period="6mo", interval="1d")
 
-    df['EMA20'] = ema(df['Close'], 20)
-    df['EMA50'] = ema(df['Close'], 50)
-    df['EMA200'] = ema(df['Close'], 200)
-    df['RSI'] = rsi(df['Close'])
-    df['VWAP'] = vwap(df)
+        if df.empty:
+            return None, None, "No price data returned for this ticker."
 
-    info = stock.info
-    return df, info
+        df = df.dropna().copy()
+        df["EMA20"] = ema(df["Close"], 20)
+        df["EMA50"] = ema(df["Close"], 50)
+        df["EMA200"] = ema(df["Close"], 200)
+        df["RSI"] = rsi(df["Close"])
+        df["VWAP"] = vwap(df)
+
+        try:
+            info = stock.info
+        except Exception:
+            info = {}
+
+        return df, info, None
+
+    except Exception as e:
+        return None, None, str(e)
 
 # -----------------------------
-# NEWS (FREE)
+# NEWS
 # -----------------------------
-
+@st.cache_data(ttl=1800)
 def get_news(ticker):
-    url = f"https://news.google.com/rss/search?q={ticker}+stock"
-    feed = feedparser.parse(url)
-    news = []
-    for entry in feed.entries[:10]:
-        news.append({"title": entry.title, "link": entry.link})
-    return news
+    try:
+        url = f"https://news.google.com/rss/search?q={ticker}+stock"
+        feed = feedparser.parse(url)
+        news = []
+
+        for entry in feed.entries[:10]:
+            news.append({
+                "title": entry.title,
+                "link": entry.link
+            })
+
+        return news
+    except Exception:
+        return []
 
 # -----------------------------
-# REDDIT SENTIMENT (FREE)
+# SIMPLE SENTIMENT PLACEHOLDER
 # -----------------------------
-
-def get_reddit_sentiment():
-    # Placeholder simple sentiment (free version)
-    # Real API needs Reddit credentials
+def get_sentiment_stub():
     return {
-        "bullish": np.random.randint(40, 80),
-        "bearish": np.random.randint(20, 60)
+        "Bullish Score": "Free version placeholder",
+        "Bearish Score": "Free version placeholder",
+        "Status": "Reddit/StockTwits sentiment can be added later"
     }
 
 # -----------------------------
-# 6 PILLAR ANALYSIS ENGINE
+# ANALYSIS ENGINE
 # -----------------------------
-
 def analyze(df, info, ticker):
     latest = df.iloc[-1]
 
-    price = latest['Close']
-    ema20 = latest['EMA20']
-    ema50 = latest['EMA50']
-    ema200 = latest['EMA200']
-    rsi_val = latest['RSI']
+    price = float(latest["Close"])
+    ema20_val = float(latest["EMA20"])
+    ema50_val = float(latest["EMA50"])
+    ema200_val = float(latest["EMA200"])
+    rsi_val = float(latest["RSI"])
 
-    # FUNDAMENTALS
-    revenue = info.get("totalRevenue", 0)
-    debt = info.get("totalDebt", 0)
-    cash = info.get("totalCash", 0)
+    revenue = info.get("totalRevenue", None)
+    debt = info.get("totalDebt", None)
+    cash = info.get("totalCash", None)
+    long_name = info.get("longName", ticker.upper())
 
+    # Fundamentals
+    fundamentals_summary = "Limited free data available."
     fundamentals_score = 3
-    if revenue and cash > debt:
-        fundamentals_score = 4
 
-    # TECHNICALS
-    tech_score = 3
-    if price > ema50 and price > ema200:
-        tech_score = 4
-    if rsi_val < 30:
-        tech_score = 5
+    if revenue and cash is not None and debt is not None:
+        if cash > debt:
+            fundamentals_summary = (
+                f"{long_name} shows decent balance sheet strength with cash exceeding debt. "
+                f"Revenue data is available, which supports a more stable fundamental profile."
+            )
+            fundamentals_score = 4
+        else:
+            fundamentals_summary = (
+                f"{long_name} has revenue data available, but debt appears higher relative to cash, "
+                f"so balance-sheet risk is higher."
+            )
+            fundamentals_score = 2
 
-    # RISK
-    volatility = df['Close'].pct_change().std()
-    risk_score = 3 if volatility < 0.02 else 2
+    # Technicals
+    technicals_score = 3
+    technicals_summary = (
+        f"Price is {price:.2f}. EMA20 is {ema20_val:.2f}, EMA50 is {ema50_val:.2f}, "
+        f"EMA200 is {ema200_val:.2f}, and RSI is {rsi_val:.2f}."
+    )
 
-    # STRATEGY
-    strategy_score = 4 if price > ema200 else 3
+    if price > ema50_val and price > ema200_val:
+        technicals_score = 4
+        technicals_summary += " Trend structure is bullish because price is above key moving averages."
 
-    # ENTRY/EXIT
-    entry = ema50
-    target = price * 1.15
-    stop = price * 0.92
+    if rsi_val > 70:
+        technicals_summary += " RSI suggests the stock may be overbought."
+    elif rsi_val < 30:
+        technicals_summary += " RSI suggests the stock may be oversold."
 
-    # MINDSET
-    mindset_score = 4
+    # Risk Management
+    daily_returns = df["Close"].pct_change().dropna()
+    volatility = float(daily_returns.std()) if not daily_returns.empty else 0
 
-    total = np.mean([
-        fundamentals_score,
-        tech_score,
-        risk_score,
-        strategy_score,
-        3,
-        mindset_score
-    ])
+    if volatility < 0.02:
+        risk_score = 4
+        risk_summary = (
+            "Volatility is relatively moderate for a stock, which supports more controlled position sizing."
+        )
+    elif volatility < 0.04:
+        risk_score = 3
+        risk_summary = (
+            "Volatility is moderate. Position sizing should stay disciplined, especially around news events."
+        )
+    else:
+        risk_score = 2
+        risk_summary = (
+            "Volatility is high. This stock may require smaller position sizing and wider stop placement."
+        )
+
+    # Trading Plan
+    if price > ema200_val:
+        trading_plan_score = 4
+        trading_plan_summary = (
+            "Primary thesis is trend continuation. A 6-12 month view favors holding while the long-term trend remains intact."
+        )
+    else:
+        trading_plan_score = 2
+        trading_plan_summary = (
+            "Primary thesis is weaker because the stock is below its long-term trend. A 6-12 month outlook needs caution."
+        )
+
+    # Entry / Exit
+    recent_low = float(df["Low"].tail(20).min())
+    recent_high = float(df["High"].tail(20).max())
+
+    entry_zone_low = min(price, ema50_val)
+    entry_zone_high = max(price, ema50_val)
+    target_price = max(price * 1.15, recent_high * 1.05)
+    stop_loss = min(recent_low, price * 0.92)
+
+    entry_exit_score = 3
+    entry_exit_summary = (
+        f"Possible entry zone: {entry_zone_low:.2f} to {entry_zone_high:.2f}. "
+        f"12-month target price: {target_price:.2f}. "
+        f"Protective stop-loss: {stop_loss:.2f}."
+    )
+
+    # Strong Mindset
+    if volatility >= 0.04:
+        mindset_score = 3
+        mindset_summary = (
+            "Main emotional pitfall is reacting to volatility. Rules: avoid revenge trading, respect stop-losses, and keep size small."
+        )
+    else:
+        mindset_score = 4
+        mindset_summary = (
+            "Main emotional pitfall is overconfidence during steady trends. Rules: stick to the plan, avoid chasing, and review risk before adding."
+        )
+
+    scores = {
+        "Fundamentals": fundamentals_score,
+        "Technicals": technicals_score,
+        "Risk Management": risk_score,
+        "Trading Plan": trading_plan_score,
+        "Entry/Exit Strategy": entry_exit_score,
+        "Strong Mindset": mindset_score,
+    }
+
+    overall_score = round(sum(scores.values()) / len(scores), 2)
 
     return {
-        "fundamentals": fundamentals_score,
-        "technicals": tech_score,
-        "risk": risk_score,
-        "strategy": strategy_score,
-        "entry": entry,
-        "target": target,
-        "stop": stop,
-        "mindset": mindset_score,
-        "overall": round(total, 2)
+        "fundamentals_summary": fundamentals_summary,
+        "technicals_summary": technicals_summary,
+        "risk_summary": risk_summary,
+        "trading_plan_summary": trading_plan_summary,
+        "entry_exit_summary": entry_exit_summary,
+        "mindset_summary": mindset_summary,
+        "scores": scores,
+        "overall_score": overall_score,
     }
 
 # -----------------------------
 # UI
 # -----------------------------
+st.title("AI Stock Intelligence Dashboard")
 
-st.title("📊 AI Stock Intelligence Dashboard (Advanced)")
+st.write("Enter a ticker to load price data, news, and a free 6-pillar analysis.")
 
-ticker = st.text_input("Enter Ticker (e.g., NVDA, AAPL)", "NVDA")
+ticker = st.text_input("Enter Ticker (e.g., NVDA, AAPL)", "").strip().upper()
 
-if ticker:
-    df, info = get_stock_data(ticker)
-    analysis = analyze(df, info, ticker)
-    news = get_news(ticker)
-    sentiment = get_reddit_sentiment()
+if not ticker:
+    st.info("Enter a ticker above to begin.")
+    st.stop()
 
-    col1, col2 = st.columns(2)
+df, info, error = get_stock_data(ticker)
 
-    with col1:
-        st.subheader("📈 Price Chart")
-        st.line_chart(df[['Close', 'EMA20', 'EMA50', 'EMA200']])
+if error:
+    st.error(f"Data temporarily unavailable: {error}")
+    st.info("This usually happens because Yahoo Finance free data is rate-limited. Wait a minute and try again.")
+    st.stop()
 
-        st.subheader("RSI")
-        st.line_chart(df['RSI'])
-
-    with col2:
-        st.subheader("🧠 Sentiment")
-        st.write(sentiment)
-
-        st.subheader("📰 News")
-        for n in news[:5]:
-            st.write(f"- [{n['title']}]({n['link']})")
-
-    st.divider()
-
-    st.subheader("📊 6-Pillar Trading Analysis")
-
-    st.write(f"**Fundamentals:** Score {analysis['fundamentals']} / 5")
-    st.write(f"**Technicals:** Score {analysis['technicals']} / 5")
-    st.write(f"**Risk Management:** Score {analysis['risk']} / 5")
-    st.write(f"**Trading Strategy:** Score {analysis['strategy']} / 5")
-
-    st.write(f"**Entry:** {analysis['entry']:.2f}")
-    st.write(f"**Target (12M):** {analysis['target']:.2f}")
-    st.write(f"**Stop Loss:** {analysis['stop']:.2f}")
-
-    st.write(f"**Mindset:** Score {analysis['mindset']} / 5")
-
-    st.subheader("🏁 Overall Score")
-    st.metric("Rating", f"{analysis['overall']} / 5")
+analysis = analyze(df, info or {}, ticker)
+news = get_news(ticker)
+sentiment = get_sentiment_stub()
 
 # -----------------------------
-# RUN:
-# streamlit run app.py
+# TOP METRICS
 # -----------------------------
+latest_close = float(df["Close"].iloc[-1])
+prev_close = float(df["Close"].iloc[-2]) if len(df) > 1 else latest_close
+change = latest_close - prev_close
+pct_change = (change / prev_close * 100) if prev_close != 0 else 0
+
+col1, col2, col3 = st.columns(3)
+col1.metric("Ticker", ticker)
+col2.metric("Last Price", f"{latest_close:.2f}", f"{change:.2f} ({pct_change:.2f}%)")
+col3.metric("Overall Score", f"{analysis['overall_score']} / 5")
+
+# -----------------------------
+# CHARTS
+# -----------------------------
+st.subheader("Price and Moving Averages")
+st.line_chart(df[["Close", "EMA20", "EMA50", "EMA200"]])
+
+st.subheader("RSI")
+st.line_chart(df[["RSI"]])
+
+# -----------------------------
+# NEWS + SENTIMENT
+# -----------------------------
+left, right = st.columns(2)
+
+with left:
+    st.subheader("Latest News")
+    if news:
+        for item in news[:8]:
+            st.markdown(f"- [{item['title']}]({item['link']})")
+    else:
+        st.write("No news available right now.")
+
+with right:
+    st.subheader("Sentiment")
+    for k, v in sentiment.items():
+        st.write(f"**{k}:** {v}")
+
+# -----------------------------
+# 6-PILLAR ANALYSIS
+# -----------------------------
+st.subheader("Comprehensive 6-Pillar Trading Analysis")
+
+st.markdown("**1. Fundamentals**")
+st.write(analysis["fundamentals_summary"])
+
+st.markdown("**2. Technicals**")
+st.write(analysis["technicals_summary"])
+
+st.markdown("**3. Risk Management**")
+st.write(analysis["risk_summary"])
+
+st.markdown("**4. Trading Plan**")
+st.write(analysis["trading_plan_summary"])
+
+st.markdown("**5. Entry/Exit Strategy**")
+st.write(analysis["entry_exit_summary"])
+
+st.markdown("**6. Strong Mindset**")
+st.write(analysis["mindset_summary"])
+
+# -----------------------------
+# RATING TABLE
+# -----------------------------
+st.subheader("Consolidated Rating Table")
+
+rating_df = pd.DataFrame(
+    {
+        "Pillar": list(analysis["scores"].keys()),
+        "Score (1-5)": list(analysis["scores"].values()),
+    }
+)
+
+st.dataframe(rating_df, use_container_width=True)
+st.success(f"Overall Score: {analysis['overall_score']} / 5")
