@@ -4,3 +4,4 @@ pandas
 numpy
 feedparser
 requests
+plotly
