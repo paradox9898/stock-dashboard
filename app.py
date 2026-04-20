@@ -6,327 +6,248 @@ import feedparser
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
-import os
-import csv
-import json
-import requests
+import os, csv, json, requests, re
 
-st.set_page_config(
-    page_title="Utpal Trading Dashboard",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="Utpal Trading Desk", layout="wide", initial_sidebar_state="expanded")
 
-# ─────────────────────────────────────────
-# CUSTOM CSS — TradingView-style dark theme
-# ─────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+#  CSS — clean TradingView-style dark with card polish
+# ══════════════════════════════════════════════════════════════
 st.markdown("""
 <style>
-body, .stApp { background-color: #131722; color: #d1d4dc; font-family: 'Trebuchet MS', sans-serif; }
-.stTextInput > div > input { background-color: #1e222d; color: #d1d4dc; border: 1px solid #363a45; border-radius: 4px; }
-.stSelectbox > div > div { background-color: #1e222d; color: #d1d4dc; }
-.stButton > button { background-color: #2962ff; color: white; border: none; border-radius: 4px; padding: 6px 16px; font-weight: bold; }
-.stButton > button:hover { background-color: #1e53e5; }
-.metric-card { background: #1e222d; border: 1px solid #363a45; border-radius: 6px; padding: 12px 16px; margin: 4px; }
-.pillar-card { background: #1e222d; border-left: 4px solid #2962ff; border-radius: 4px; padding: 14px; margin-bottom: 10px; }
-.pillar-card.strong { border-left-color: #26a69a; }
-.pillar-card.weak { border-left-color: #ef5350; }
-.pillar-card.avg { border-left-color: #f5c842; }
-.number-chip { background: #2a2e39; border-radius: 3px; padding: 2px 7px; font-size: 12px; margin-right: 4px; color: #d1d4dc; display: inline-block; }
-.green { color: #26a69a; font-weight: bold; }
-.red { color: #ef5350; font-weight: bold; }
-.yellow { color: #f5c842; font-weight: bold; }
-h1, h2, h3 { color: #d1d4dc; }
-div[data-testid="stMetric"] { background: #1e222d; border: 1px solid #363a45; border-radius: 6px; padding: 10px 14px; }
-div[data-testid="stMetricLabel"] { color: #787b86; font-size: 11px; }
-div[data-testid="stMetricValue"] { color: #d1d4dc; font-size: 22px; font-weight: bold; }
-.sidebar .sidebar-content { background: #1e222d; }
-[data-testid="stSidebar"] { background-color: #1e222d; border-right: 1px solid #363a45; }
-.risk-high { background: rgba(239,83,80,0.15); border: 1px solid #ef5350; border-radius: 6px; padding: 10px 14px; }
-.risk-med  { background: rgba(245,200,66,0.10); border: 1px solid #f5c842; border-radius: 6px; padding: 10px 14px; }
-.risk-low  { background: rgba(38,166,154,0.10); border: 1px solid #26a69a; border-radius: 6px; padding: 10px 14px; }
-.data-panel { background: #1a1e2e; border: 1px solid #2a2e3e; border-radius: 8px; padding: 14px 18px; margin-bottom: 12px; }
-.regime-bull { background: rgba(38,166,154,0.12); border: 1px solid #26a69a; border-radius: 6px; padding: 8px 14px; display:inline-block; margin:4px; }
-.regime-bear { background: rgba(239,83,80,0.12); border: 1px solid #ef5350; border-radius: 6px; padding: 8px 14px; display:inline-block; margin:4px; }
-.regime-chop { background: rgba(245,200,66,0.10); border: 1px solid #f5c842; border-radius: 6px; padding: 8px 14px; display:inline-block; margin:4px; }
-.ticker-btn button { background: transparent !important; border: 1px solid #363a45 !important; color: #2962ff !important; font-weight: bold !important; padding: 2px 8px !important; font-size:12px !important; }
-.ai-box { background: #1a1e2e; border: 1px solid #2962ff; border-radius: 8px; padding: 16px; margin-top: 8px; }
+body,.stApp{background:#131722;color:#d1d4dc;font-family:'Inter',sans-serif;}
+.stTextInput>div>input,.stSelectbox>div>div,.stNumberInput>div>input{
+  background:#1e222d;color:#d1d4dc;border:1px solid #363a45;border-radius:6px;}
+.stButton>button{background:#2962ff;color:#fff;border:none;border-radius:6px;
+  padding:7px 18px;font-weight:600;letter-spacing:.3px;}
+.stButton>button:hover{background:#1e53e5;}
+/* Cards */
+.card{background:#1e222d;border:1px solid #2a2e3e;border-radius:10px;padding:16px 20px;margin-bottom:12px;}
+.card-accent-green{border-left:4px solid #26a69a;}
+.card-accent-red  {border-left:4px solid #ef5350;}
+.card-accent-blue {border-left:4px solid #2962ff;}
+.card-accent-gold {border-left:4px solid #f5c842;}
+/* Metric overrides */
+div[data-testid="stMetric"]{background:#1e222d;border:1px solid #2a2e3e;
+  border-radius:8px;padding:10px 14px;}
+div[data-testid="stMetricLabel"]{color:#787b86;font-size:11px;text-transform:uppercase;letter-spacing:.5px;}
+div[data-testid="stMetricValue"]{color:#d1d4dc;font-size:20px;font-weight:700;}
+/* Sidebar */
+[data-testid="stSidebar"]{background:#161b27;border-right:1px solid #2a2e3e;}
+/* Risk badges */
+.risk-high{background:rgba(239,83,80,.15);border:1px solid #ef5350;border-radius:8px;padding:10px 16px;}
+.risk-med {background:rgba(245,200,66,.10);border:1px solid #f5c842;border-radius:8px;padding:10px 16px;}
+.risk-low {background:rgba(38,166,154,.10);border:1px solid #26a69a;border-radius:8px;padding:10px 16px;}
+/* Signal chips */
+.chip{display:inline-block;padding:4px 10px;border-radius:20px;font-size:11px;
+  font-weight:600;margin:3px 3px 3px 0;white-space:nowrap;}
+.chip-green{background:rgba(38,166,154,.2);border:1px solid #26a69a;color:#26a69a;}
+.chip-red  {background:rgba(239,83,80,.2);border:1px solid #ef5350;color:#ef5350;}
+.chip-gold {background:rgba(245,200,66,.2);border:1px solid #f5c842;color:#f5c842;}
+.chip-blue {background:rgba(41,98,255,.2);border:1px solid #2962ff;color:#7ab4ff;}
+/* AI box */
+.ai-box{background:#161b27;border:1px solid #2962ff;border-radius:10px;
+  padding:18px 22px;margin-top:10px;line-height:1.7;}
+/* News scroll */
+.news-scroll{max-height:420px;overflow-y:auto;padding-right:6px;}
+.news-item{background:#1e222d;border:1px solid #2a2e3e;border-radius:8px;
+  padding:10px 14px;margin-bottom:8px;}
+.news-item:hover{border-color:#2962ff;}
+/* Trade plan table */
+.trade-table{width:100%;border-collapse:collapse;}
+.trade-table td{padding:6px 4px;border-bottom:1px solid #2a2e3e;font-size:13px;}
+.trade-table td:first-child{color:#787b86;}
+.trade-table td:last-child{text-align:right;font-weight:600;}
+/* Signal alert */
+.signal-alert{background:rgba(239,83,80,.12);border:1px solid #ef5350;
+  border-radius:8px;padding:10px 14px;margin-bottom:8px;}
+.signal-good {background:rgba(38,166,154,.12);border:1px solid #26a69a;
+  border-radius:8px;padding:10px 14px;margin-bottom:8px;}
+/* Data integrity */
+.data-panel{background:#161b27;border:1px solid #2a2e3e;border-radius:8px;padding:12px 16px;margin-bottom:12px;}
+.green{color:#26a69a;font-weight:700;}
+.red{color:#ef5350;font-weight:700;}
+.gold{color:#f5c842;font-weight:700;}
+h1,h2,h3{color:#d1d4dc;}
 </style>
 """, unsafe_allow_html=True)
 
-# ─────────────────────────────────────────
-# PORTFOLIO CONFIG
-# ─────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+#  PORTFOLIO CONFIG
+# ══════════════════════════════════════════════════════════════
 DEFAULT_PORTFOLIO = {
-    "AVGO.NE": {"shares": 1005, "avg_cost": 13.4353, "currency": "CAD", "target": 20.0},
-    "META.NE": {"shares": 417,  "avg_cost": 32.59,   "currency": "CAD", "target": 45.0},
+    "AVGO.TO": {"shares": 1005, "avg_cost": 13.4353, "currency": "CAD", "target": 20.0},
+    "META.TO": {"shares": 417,  "avg_cost": 32.59,   "currency": "CAD", "target": 45.0},
 }
+CASH_USD   = 16147.0
+CAD_RATE   = 1.38
+GOAL_LOW   = 60000
+GOAL_HIGH  = 80000
 
 DEFAULT_WATCHLIST = [
-    "AVGO", "META", "NVDA", "AMD", "AMZN", "MSFT", "GOOGL",
-    "DOCN", "NET", "ALAB", "COHR", "MU", "INTC", "NFLX", "CLS"
+    "AVGO","META","NVDA","AMD","AMZN","MSFT","GOOGL",
+    "DOCN","NET","COHR","MU","INTC","NFLX","CLS",
+    "ALAB","VRT","DELL","CIEN","GLW","KEYS",
 ]
-
 JOURNAL_FILE = "trade_journal.csv"
-JOURNAL_COLS = [
-    "date", "ticker", "direction", "asset_type", "entry", "stop", "target",
-    "size", "thesis", "timeframe", "alignment_score", "catalyst_state",
-    "options_setup", "result", "pnl", "notes", "mistakes"
-]
+JOURNAL_COLS = ["date","ticker","direction","asset_type","entry","stop","target",
+                "size","thesis","timeframe","alignment_score","catalyst_state",
+                "options_setup","result","pnl","notes","mistakes"]
 
-# ─────────────────────────────────────────
-# OPENROUTER INTEGRATION
-# ─────────────────────────────────────────
-def get_openrouter_key():
-    try:
-        return st.secrets.get("OPENROUTER_API_KEY")
-    except Exception:
-        return None
-
-def generate_ai_commentary(payload, provider="none", model="openrouter/auto"):
-    """
-    Generate AI commentary. Falls back to Python-generated summary if provider=none or on failure.
-    NEVER logs or prints the API key.
-    """
-    if provider == "none":
-        return _python_summary(payload)
-
-    api_key = get_openrouter_key()
-    if not api_key:
-        return _python_summary(payload), "⚠️ AI commentary unavailable — OPENROUTER_API_KEY not set in secrets."
-
-    prompt = f"""You are a professional trading analyst. Analyze this trading setup and respond in structured format.
-
-Setup Data:
-- Ticker: {payload.get('ticker')}
-- Price: ${payload.get('price', 0):.2f}
-- Trend Bias: {payload.get('trend_bias')}
-- RSI: {payload.get('rsi', 0):.1f}
-- Alignment Score: {payload.get('alignment_score')}/100
-- Primary MTF Bias: {payload.get('primary_bias')}
-- Event Risk: {payload.get('event_risk')}
-- Options Vehicle: {payload.get('options_vehicle')}
-- Entry Zone: ${payload.get('entry_low', 0):.2f} – ${payload.get('entry_high', 0):.2f}
-- Stop: ${payload.get('stop_loss', 0):.2f}
-- Target 1: ${payload.get('target_1', 0):.2f}
-- Target 2: ${payload.get('target_2', 0):.2f}
-- R:R: {payload.get('rr', 0):.2f}x
-- IV: {payload.get('iv', 'N/A')}
-- Sentiment: {payload.get('sentiment_label')} ({payload.get('sentiment_score')}/100)
-- ATR%: {payload.get('atr_pct', 0):.2f}%
-- Overall Score: {payload.get('overall_score')}/5
-- Key Support: ${payload.get('support', 0):.2f}
-- Key Resistance: ${payload.get('resistance', 0):.2f}
-
-Respond ONLY with these 6 numbered sections, concisely:
-1. Setup Summary: 2 sentence overview
-2. Why This Signal: data-driven reason
-3. What to Watch Next: 2 key catalysts or price levels
-4. Best Vehicle: specific recommendation with brief reasoning
-5. Invalidation Level: exact price and why
-6. Discipline Note: 1 actionable mindset reminder
-"""
-
-    try:
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://utpal-trading-dashboard.streamlit.app",
-            "X-Title": "Utpal Trading Dashboard",
-        }
-        body = {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 600,
-        }
-        resp = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers=headers,
-            json=body,
-            timeout=20
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            return data["choices"][0]["message"]["content"], None
-        else:
-            fallback = _python_summary(payload)
-            return fallback, f"⚠️ OpenRouter returned {resp.status_code}. Showing Python summary."
-    except Exception as e:
-        fallback = _python_summary(payload)
-        return fallback, f"⚠️ OpenRouter call failed: {str(e)[:80]}. Showing Python summary."
-
-def _python_summary(payload):
-    """Pure Python-generated fallback commentary."""
-    lines = []
-    ticker    = payload.get("ticker", "?")
-    trend     = payload.get("trend_bias", "Neutral")
-    rsi       = payload.get("rsi", 50)
-    score     = payload.get("overall_score", 3)
-    entry_lo  = payload.get("entry_low", 0)
-    entry_hi  = payload.get("entry_high", 0)
-    stop      = payload.get("stop_loss", 0)
-    t1        = payload.get("target_1", 0)
-    t2        = payload.get("target_2", 0)
-    rr        = payload.get("rr", 0)
-    event     = payload.get("event_risk", "Low")
-    vehicle   = payload.get("options_vehicle", "Wait")
-    support   = payload.get("support", 0)
-    resist    = payload.get("resistance", 0)
-    align     = payload.get("alignment_score", 50)
-    atr_pct   = payload.get("atr_pct", 2)
-
-    lines.append(f"**1. Setup Summary:** {ticker} has a {score}/5 overall score with a **{trend}** bias. "
-                 f"Multi-timeframe alignment is {align}/100.")
-
-    if trend == "Bullish":
-        lines.append(f"**2. Why This Signal:** Price is above key EMAs with RSI at {rsi:.0f} (healthy range). "
-                     f"Supertrend is bullish and MACD leans positive.")
-    elif trend == "Bearish":
-        lines.append(f"**2. Why This Signal:** Price is below key moving averages with RSI at {rsi:.0f}. "
-                     f"Downward momentum is confirmed by Supertrend direction.")
-    else:
-        lines.append(f"**2. Why This Signal:** Mixed signals across timeframes — no dominant trend. "
-                     f"RSI at {rsi:.0f} is neutral. Wait for resolution.")
-
-    lines.append(f"**3. What to Watch Next:** Price reaction at ${support:.2f} support and ${resist:.2f} resistance. "
-                 f"Monitor RSI for overbought/oversold extremes.")
-
-    lines.append(f"**4. Best Vehicle:** {vehicle} — Entry ${entry_lo:.2f}–${entry_hi:.2f}, "
-                 f"Stop ${stop:.2f}, T1 ${t1:.2f}, T2 ${t2:.2f}, R:R {rr:.1f}x.")
-
-    if event == "High":
-        lines.append(f"**5. Invalidation Level:** Avoid — earnings risk is HIGH. "
-                     f"Any position invalidated below ${stop:.2f}.")
-    else:
-        lines.append(f"**5. Invalidation Level:** Trade is invalid below ${stop:.2f}. "
-                     f"A close below this level means the thesis is broken — exit without hesitation.")
-
-    if atr_pct > 3:
-        lines.append(f"**6. Discipline Note:** High ATR ({atr_pct:.1f}%) means wide swings are normal. "
-                     f"Size down and honor your stop — don't let volatility override your plan.")
-    else:
-        lines.append(f"**6. Discipline Note:** Define your exit BEFORE you enter. "
-                     f"If price reaches ${stop:.2f}, exit — no averaging down.")
-
-    return "\n\n".join(lines)
-
-# ─────────────────────────────────────────
-# INDICATOR FUNCTIONS
-# ─────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+#  INDICATOR FUNCTIONS — all fixed/verified
+# ══════════════════════════════════════════════════════════════
 def ema(series, period):
     return series.ewm(span=period, adjust=False).mean()
 
 def rsi(series, period=14):
     delta = series.diff()
-    gain = delta.where(delta > 0, 0).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
+    gain  = delta.where(delta>0, 0).ewm(com=period-1, adjust=False).mean()
+    loss  = (-delta.where(delta<0, 0)).ewm(com=period-1, adjust=False).mean()
+    rs    = gain / loss.replace(0, np.nan)
     return 100 - (100 / (1 + rs))
 
 def macd(series, fast=12, slow=26, signal=9):
-    fast_ema = series.ewm(span=fast, adjust=False).mean()
-    slow_ema = series.ewm(span=slow, adjust=False).mean()
-    macd_line = fast_ema - slow_ema
-    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
-    histogram = macd_line - signal_line
-    return macd_line, signal_line, histogram
+    fast_ema   = series.ewm(span=fast, adjust=False).mean()
+    slow_ema   = series.ewm(span=slow, adjust=False).mean()
+    macd_line  = fast_ema - slow_ema
+    signal_line= macd_line.ewm(span=signal, adjust=False).mean()
+    return macd_line, signal_line, macd_line - signal_line
 
 def atr(df, period=14):
-    high_low = df["High"] - df["Low"]
-    high_close = np.abs(df["High"] - df["Close"].shift(1))
-    low_close  = np.abs(df["Low"]  - df["Close"].shift(1))
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    return tr.rolling(period).mean()
+    hl  = df["High"] - df["Low"]
+    hc  = (df["High"] - df["Close"].shift(1)).abs()
+    lc  = (df["Low"]  - df["Close"].shift(1)).abs()
+    tr  = pd.concat([hl, hc, lc], axis=1).max(axis=1)
+    return tr.ewm(com=period-1, adjust=False).mean()
 
-def vwap(df):
-    tp = (df["High"] + df["Low"] + df["Close"]) / 3
-    return (tp * df["Volume"]).cumsum() / df["Volume"].cumsum()
+def vwap_calc(df, interval="1d"):
+    """VWAP: daily-reset for intraday, rolling-20 for daily/weekly."""
+    tp  = (df["High"] + df["Low"] + df["Close"]) / 3
+    tpv = tp * df["Volume"]
+    if interval in ("1m","5m","15m","1h","4h"):
+        idx = df.index
+        if hasattr(idx, "tz") and idx.tz is not None:
+            dates = idx.tz_convert("America/New_York").normalize()
+        else:
+            dates = pd.DatetimeIndex(idx).normalize()
+        result = pd.Series(np.nan, index=idx)
+        for d in dates.unique():
+            mask = dates == d
+            cum_tpv = tpv[mask].cumsum()
+            cum_vol = df["Volume"][mask].cumsum().replace(0, np.nan)
+            result[mask] = cum_tpv.values / cum_vol.values
+        return result
+    else:
+        # 20-period rolling VWAP for daily/weekly — volume-weighted MA
+        roll_tpv = tpv.rolling(20, min_periods=1).sum()
+        roll_vol = df["Volume"].rolling(20, min_periods=1).sum().replace(0, np.nan)
+        return roll_tpv / roll_vol
 
 def bollinger_bands(series, period=20, std_dev=2):
     mid   = series.rolling(period).mean()
     sigma = series.rolling(period).std()
-    return mid + std_dev * sigma, mid, mid - std_dev * sigma
+    return mid + std_dev*sigma, mid, mid - std_dev*sigma
 
 def supertrend(df, period=10, multiplier=3):
-    data = df.copy()
-    hl2  = (data["High"] + data["Low"]) / 2
-    data["ATR"] = atr(data, period)
-    ub = hl2 + multiplier * data["ATR"]
-    lb = hl2 - multiplier * data["ATR"]
-    final_ub = ub.copy()
-    final_lb = lb.copy()
+    data  = df.copy()
+    hl2   = (data["High"] + data["Low"]) / 2
+    data["ATR14"] = atr(data, period)
+    ub = hl2 + multiplier * data["ATR14"]
+    lb = hl2 - multiplier * data["ATR14"]
+    final_ub, final_lb = ub.copy(), lb.copy()
     for i in range(1, len(data)):
-        final_ub.iloc[i] = min(ub.iloc[i], final_ub.iloc[i-1]) if data["Close"].iloc[i-1] <= final_ub.iloc[i-1] else ub.iloc[i]
-        final_lb.iloc[i] = max(lb.iloc[i], final_lb.iloc[i-1]) if data["Close"].iloc[i-1] >= final_lb.iloc[i-1] else lb.iloc[i]
-    trend     = pd.Series(index=data.index, dtype="float64")
+        final_ub.iloc[i] = (min(ub.iloc[i], final_ub.iloc[i-1])
+                            if data["Close"].iloc[i-1] <= final_ub.iloc[i-1] else ub.iloc[i])
+        final_lb.iloc[i] = (max(lb.iloc[i], final_lb.iloc[i-1])
+                            if data["Close"].iloc[i-1] >= final_lb.iloc[i-1] else lb.iloc[i])
+    trend = pd.Series(index=data.index, dtype="float64")
     direction = pd.Series(index=data.index, dtype="object")
     for i in range(len(data)):
         if i == 0:
-            trend.iloc[i]     = final_lb.iloc[i]
-            direction.iloc[i] = "up"
-            continue
+            trend.iloc[0] = final_lb.iloc[0]; direction.iloc[0] = "up"; continue
         if trend.iloc[i-1] == final_ub.iloc[i-1]:
             if data["Close"].iloc[i] <= final_ub.iloc[i]:
-                trend.iloc[i]     = final_ub.iloc[i]
-                direction.iloc[i] = "down"
+                trend.iloc[i] = final_ub.iloc[i]; direction.iloc[i] = "down"
             else:
-                trend.iloc[i]     = final_lb.iloc[i]
-                direction.iloc[i] = "up"
+                trend.iloc[i] = final_lb.iloc[i]; direction.iloc[i] = "up"
         else:
             if data["Close"].iloc[i] >= final_lb.iloc[i]:
-                trend.iloc[i]     = final_lb.iloc[i]
-                direction.iloc[i] = "up"
+                trend.iloc[i] = final_lb.iloc[i]; direction.iloc[i] = "up"
             else:
-                trend.iloc[i]     = final_ub.iloc[i]
-                direction.iloc[i] = "down"
-    data["Supertrend"]          = trend
-    data["SupertrendDirection"] = direction
-    return data["Supertrend"], data["SupertrendDirection"]
+                trend.iloc[i] = final_ub.iloc[i]; direction.iloc[i] = "down"
+    return trend, direction
 
-# ─────────────────────────────────────────
-# DATA FETCH
-# ─────────────────────────────────────────
+# ── SUPPORT / RESISTANCE (swing highs/lows — not simple min/max) ──
+def get_swing_levels(df, lookback=5):
+    """Proper swing highs and lows via local extrema detection."""
+    highs, lows = [], []
+    h, l, c = df["High"].values, df["Low"].values, df["Close"].values
+    n = len(df)
+    for i in range(lookback, n - lookback):
+        if h[i] == max(h[i-lookback:i+lookback+1]):
+            highs.append(float(h[i]))
+        if l[i] == min(l[i-lookback:i+lookback+1]):
+            lows.append(float(l[i]))
+    # Deduplicate levels within 1%
+    def dedup(levels, reverse=False):
+        seen, out = [], []
+        for p in sorted(levels, reverse=reverse):
+            if not any(abs(p - s)/max(s,0.01) < 0.01 for s in seen):
+                seen.append(p); out.append(p)
+        return out[:6]
+    return dedup(highs, reverse=True), dedup(lows)
+
+def get_key_levels(df):
+    """Returns (s1,s2,s3,r1,r2,r3) using swing levels with fallback."""
+    price = float(df["Close"].iloc[-1])
+    swing_highs, swing_lows = get_swing_levels(df)
+    supports    = sorted([x for x in swing_lows  if x < price*1.005], reverse=True)
+    resistances = sorted([x for x in swing_highs if x > price*0.995])
+    # Fallback to period min/max
+    fb_s = [float(df["Low"].tail(n).min()) for n in [20,50,200] if len(df)>=n]
+    fb_r = [float(df["High"].tail(n).max()) for n in [20,50,200] if len(df)>=n]
+    while len(supports)    < 3: supports.append(fb_s[min(len(supports),len(fb_s)-1)] if fb_s else price*0.95)
+    while len(resistances) < 3: resistances.append(fb_r[min(len(resistances),len(fb_r)-1)] if fb_r else price*1.05)
+    return supports[0],supports[1],supports[2], resistances[0],resistances[1],resistances[2]
+
+# ══════════════════════════════════════════════════════════════
+#  DATA FETCH
+# ══════════════════════════════════════════════════════════════
 INTERVAL_MAP = {
-    "1m":  "7d",
-    "5m":  "30d",
-    "15m": "60d",
-    "1h":  "730d",
-    "4h":  "730d",
-    "1d":  "2y",
-    "1wk": "5y",
+    "1m":"7d","5m":"30d","15m":"60d","1h":"730d",
+    "4h":"730d","1d":"2y","1wk":"5y",
 }
 
 @st.cache_data(ttl=300)
 def get_stock_data(ticker, interval="1d"):
     try:
-        period = INTERVAL_MAP.get(interval, "2y")
+        period     = INTERVAL_MAP.get(interval, "2y")
         fetch_time = datetime.now()
-        stock  = yf.Ticker(ticker)
-        df     = stock.history(period=period, interval=interval, auto_adjust=False)
-        if df.empty:
+        stock      = yf.Ticker(ticker)
+        df         = stock.history(period=period, interval=interval, auto_adjust=False)
+        if df is None or df.empty:
             return None, None, f"No data for {ticker}", None
         df = df.dropna().copy()
-        df["EMA9"]    = ema(df["Close"], 9)
-        df["EMA20"]   = ema(df["Close"], 20)
-        df["EMA50"]   = ema(df["Close"], 50)
-        df["EMA200"]  = ema(df["Close"], 200)
-        df["RSI"]     = rsi(df["Close"])
-        df["VWAP"]    = vwap(df)
-        df["ATR"]     = atr(df, 14)
-        df["MACD"], df["MACD_Signal"], df["MACD_Hist"] = macd(df["Close"])
-        df["BB_Upper"], df["BB_Mid"], df["BB_Lower"]   = bollinger_bands(df["Close"])
-        df["Supertrend"], df["SupertrendDir"]          = supertrend(df, 10, 3)
+        # Core indicators
+        df["EMA9"]   = ema(df["Close"],9)
+        df["EMA20"]  = ema(df["Close"],20)
+        df["EMA50"]  = ema(df["Close"],50)
+        df["EMA200"] = ema(df["Close"],200)
+        df["RSI"]    = rsi(df["Close"])
+        df["ATR"]    = atr(df,14)
+        df["VWAP"]   = vwap_calc(df, interval)
+        df["MACD"],df["MACD_Signal"],df["MACD_Hist"] = macd(df["Close"])
+        df["BB_Upper"],df["BB_Mid"],df["BB_Lower"]   = bollinger_bands(df["Close"])
+        df["Supertrend"],df["SupertrendDir"]         = supertrend(df,10,3)
+        # Volume indicators
+        df["Vol_EMA20"] = ema(df["Volume"], 20)
         try:
-            info = stock.info
+            info = stock.info or {}
         except Exception:
             info = {}
-        meta = {
-            "fetch_time": fetch_time,
-            "last_candle": df.index[-1],
-            "bar_count": len(df),
-            "interval": interval,
-            "source": "Yahoo Finance",
-        }
+        meta = {"fetch_time": fetch_time, "last_candle": df.index[-1],
+                "bar_count": len(df), "interval": interval, "source": "Yahoo Finance"}
         return df, info, None, meta
     except Exception as e:
         return None, None, str(e), None
@@ -334,1711 +255,1780 @@ def get_stock_data(ticker, interval="1d"):
 @st.cache_data(ttl=300)
 def get_portfolio_price(ticker):
     try:
-        stock = yf.Ticker(ticker)
-        df = stock.history(period="5d", interval="1d", auto_adjust=False)
+        df = yf.Ticker(ticker).history(period="5d", interval="1d", auto_adjust=False)
         if df is not None and not df.empty:
-            return float(df["Close"].iloc[-1])
+            prev = float(df["Close"].iloc[-2]) if len(df)>1 else float(df["Close"].iloc[-1])
+            curr = float(df["Close"].iloc[-1])
+            return curr, prev
     except Exception:
         pass
-    return None
+    return None, None
 
-# ─────────────────────────────────────────
-# DATA INTEGRITY PANEL
-# ─────────────────────────────────────────
-def render_data_integrity_panel(meta, ticker, interval):
-    if meta is None:
-        st.warning("⚠️ Data integrity info unavailable.")
-        return
-
-    now = datetime.now()
-    fetch_time = meta.get("fetch_time", now)
-    last_candle = meta.get("last_candle")
-
-    # Bar age
-    if last_candle is not None:
-        try:
-            lc = pd.Timestamp(last_candle)
-            if lc.tzinfo is not None:
-                lc = lc.tz_localize(None)
-            bar_age_min = int((now - lc).total_seconds() / 60)
-        except Exception:
-            bar_age_min = None
-    else:
-        bar_age_min = None
-
-    # Market status
-    market_open = now.weekday() < 5 and 9 <= now.hour < 16
-    market_status = "🟢 Market Open" if market_open else "🔴 Market Closed"
-
-    # Feed type
-    if bar_age_min is not None and bar_age_min < 20:
-        feed_type = "🔄 Near-Realtime"
-    elif bar_age_min is not None and bar_age_min < 60:
-        feed_type = "⏱ Delayed"
-    else:
-        feed_type = "📦 Historical"
-
-    st.markdown('<div class="data-panel">', unsafe_allow_html=True)
-    st.markdown("**⚙️ Data Integrity Panel**")
-    d1, d2, d3, d4, d5, d6, d7, d8 = st.columns(8)
-    d1.metric("Source", meta.get("source", "Yahoo Finance"))
-    d2.metric("Interval", interval)
-    d3.metric("Fetched", fetch_time.strftime("%H:%M:%S"))
-    d4.metric("Last Candle", str(last_candle)[:16] if last_candle else "N/A")
-    d5.metric("Bar Age", f"{bar_age_min}m" if bar_age_min is not None else "N/A")
-    d6.metric("Bar Count", meta.get("bar_count", "N/A"))
-    d7.metric("Market", market_status)
-    d8.metric("Feed", feed_type)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# ─────────────────────────────────────────
-# MARKET REGIME PANEL
-# ─────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+#  MARKET REGIME
+# ══════════════════════════════════════════════════════════════
 @st.cache_data(ttl=600)
 def get_market_regime():
-    result = {"SPY": "Unknown", "QQQ": "Unknown", "VIX": None, "regime": "Unknown"}
-    for sym in ["SPY", "QQQ"]:
+    result = {"SPY":"Unknown","QQQ":"Unknown","VIX":None,"regime":"Unknown","fear_greed":None}
+    for sym in ["SPY","QQQ"]:
         try:
-            df_r = yf.Ticker(sym).history(period="60d", interval="1d", auto_adjust=False)
-            if df_r is not None and not df_r.empty:
-                price = float(df_r["Close"].iloc[-1])
-                ema20_val = float(df_r["Close"].ewm(span=20, adjust=False).mean().iloc[-1])
-                ema50_val = float(df_r["Close"].ewm(span=50, adjust=False).mean().iloc[-1])
-                if price > ema20_val and price > ema50_val:
-                    result[sym] = "Bullish"
-                elif price < ema20_val and price < ema50_val:
-                    result[sym] = "Bearish"
-                else:
-                    result[sym] = "Chop"
+            df = yf.Ticker(sym).history(period="60d",interval="1d",auto_adjust=False)
+            if df is not None and not df.empty:
+                p  = float(df["Close"].iloc[-1])
+                e20= float(df["Close"].ewm(span=20,adjust=False).mean().iloc[-1])
+                e50= float(df["Close"].ewm(span=50,adjust=False).mean().iloc[-1])
+                result[sym] = "Bullish" if (p>e20 and p>e50) else ("Bearish" if (p<e20 and p<e50) else "Chop")
         except Exception:
             pass
-
     try:
-        df_vix = yf.Ticker("^VIX").history(period="5d", interval="1d", auto_adjust=False)
-        if df_vix is not None and not df_vix.empty:
-            result["VIX"] = float(df_vix["Close"].iloc[-1])
+        vix = yf.Ticker("^VIX").history(period="5d",interval="1d",auto_adjust=False)
+        if vix is not None and not vix.empty:
+            result["VIX"] = float(vix["Close"].iloc[-1])
     except Exception:
         pass
-
-    spy = result["SPY"]
-    qqq = result["QQQ"]
-    vix = result["VIX"]
-
-    if spy == "Bullish" and qqq == "Bullish":
-        if vix and vix > 30:
-            result["regime"] = "Risk-off"
-        else:
-            result["regime"] = "Bullish"
-    elif spy == "Bearish" and qqq == "Bearish":
-        result["regime"] = "Bearish"
-    elif vix and vix > 30:
+    s,q,v = result["SPY"],result["QQQ"],result["VIX"]
+    if s=="Bullish" and q=="Bullish":
+        result["regime"] = "Risk-on" if not v or v<25 else "Cautious Bull"
+    elif s=="Bearish" and q=="Bearish":
         result["regime"] = "Risk-off"
+    elif v and v>35:
+        result["regime"] = "Extreme Fear"
     else:
-        result["regime"] = "Chop"
-
+        result["regime"] = "Choppy"
     return result
 
-def render_market_regime():
-    regime = get_market_regime()
-    st.markdown("### 🌐 Market Regime")
-    r1, r2, r3, r4 = st.columns(4)
+# ══════════════════════════════════════════════════════════════
+#  NEWS + SENTIMENT (multi-source, 20+ items)
+# ══════════════════════════════════════════════════════════════
+BULL_WORDS = {"beat","beats","surge","surges","strong","upgrade","upgrades","record","growth",
+              "profit","soar","soars","buy","outperform","expands","positive","rebound","bullish",
+              "momentum","raises","raised","tops","rally","rallies","breakout","accelerates",
+              "boosts","exceed","exceeds","above","upside","outpaces","winning","strength"}
+BEAR_WORDS = {"miss","misses","drop","drops","downgrade","downgrades","warning","weak","fall",
+              "falls","lawsuit","loss","losses","decline","declines","probe","investigation",
+              "negative","concern","concerns","bearish","cut","cuts","risks","below","selloff",
+              "sell-off","layoffs","layoff","slows","slowdown","disappoints","disappointing",
+              "warning","warns","withdraws","reduces","faces","headwinds"}
 
-    def regime_color(val):
-        if val == "Bullish": return "#26a69a"
-        if val == "Bearish": return "#ef5350"
-        if val == "Risk-off": return "#ef5350"
-        return "#f5c842"
-
-    r1.metric("SPY", regime["SPY"])
-    r2.metric("QQQ", regime["QQQ"])
-    r3.metric("VIX", f"{regime['VIX']:.1f}" if regime["VIX"] else "N/A",
-              "High Volatility" if regime["VIX"] and regime["VIX"] > 25 else ("Normal" if regime["VIX"] else ""))
-    color = regime_color(regime["regime"])
-    r4.markdown(f"**Overall Regime:**<br><span style='color:{color};font-size:18px;font-weight:bold'>{regime['regime']}</span>", unsafe_allow_html=True)
-
-# ─────────────────────────────────────────
-# NEWS + SENTIMENT
-# ─────────────────────────────────────────
-@st.cache_data(ttl=1800)
+@st.cache_data(ttl=900)
 def get_news(ticker):
+    base  = ticker.split(".")[0]
+    items = []
+    queries = [
+        f"{base}+stock",
+        f"{base}+earnings+revenue",
+        f"{base}+analyst+price+target",
+        f"{base}+semiconductor" if base in ["AVGO","AMD","NVDA","MU","INTC","COHR"] else f"{base}+AI",
+    ]
+    seen_titles = set()
+    for q in queries:
+        try:
+            feed = feedparser.parse(f"https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en")
+            for e in feed.entries[:8]:
+                title = e.title[:120]
+                if title not in seen_titles:
+                    seen_titles.add(title)
+                    items.append({"title": title, "link": e.link,
+                                  "published": getattr(e,"published",""),
+                                  "source": getattr(e,"source",{}).get("title","Google News") if hasattr(e,"source") else "Google News"})
+        except Exception:
+            pass
+    # Yahoo Finance RSS
     try:
-        base = ticker.split(".")[0]
-        url  = f"https://news.google.com/rss/search?q={base}+stock+earnings"
-        feed = feedparser.parse(url)
-        return [{"title": e.title, "link": e.link, "published": getattr(e, "published", "")}
-                for e in feed.entries[:12]]
+        yf_feed = feedparser.parse(f"https://finance.yahoo.com/rss/headline?s={base}")
+        for e in yf_feed.entries[:6]:
+            title = e.title[:120]
+            if title not in seen_titles:
+                seen_titles.add(title)
+                items.append({"title": title, "link": e.link,
+                              "published": getattr(e,"published",""), "source": "Yahoo Finance"})
     except Exception:
-        return []
+        pass
+    return items[:25]
 
 def calculate_sentiment(news_items):
-    bull_words = {"beat","beats","surge","strong","upgrade","record","growth","profit","soar","buy","outperform","expands","positive","rebound","bullish","momentum","raises","raised","tops"}
-    bear_words = {"miss","misses","drop","downgrade","warning","weak","fall","lawsuit","loss","decline","probe","investigation","negative","concern","bearish","cut","cuts","risks","below"}
-    score = 0
-    hits  = 0
+    score, hits = 0, 0
     for item in news_items:
         t    = item["title"].lower()
-        bull = sum(1 for w in bull_words if w in t)
-        bear = sum(1 for w in bear_words if w in t)
-        score += bull - bear
-        hits  += bull + bear
-    norm  = 50 if hits == 0 else int(max(0, min(100, 50 + max(-40, min(40, score * 8)))))
-    label = "Bullish" if norm >= 65 else ("Bearish" if norm <= 35 else "Neutral")
+        bull = sum(1 for w in BULL_WORDS if w in t)
+        bear = sum(1 for w in BEAR_WORDS if w in t)
+        weight = 1.5 if "analyst" in t or "target" in t or "upgrade" in t or "downgrade" in t else 1.0
+        score += (bull - bear) * weight
+        hits  += (bull + bear) * weight
+    norm  = 50 if hits==0 else int(max(0, min(100, 50 + max(-42, min(42, score*7)))))
+    label = "Bullish" if norm>=63 else ("Bearish" if norm<=37 else "Neutral")
     return norm, label
 
-# ─────────────────────────────────────────
-# SUPPORT / RESISTANCE
-# ─────────────────────────────────────────
-def get_levels(df):
-    s20  = float(df["Low"].tail(20).min())
-    s50  = float(df["Low"].tail(50).min())  if len(df) >= 50  else s20
-    r20  = float(df["High"].tail(20).max())
-    r50  = float(df["High"].tail(50).max()) if len(df) >= 50  else r20
-    s200 = float(df["Low"].tail(200).min()) if len(df) >= 200 else s50
-    r200 = float(df["High"].tail(200).max()) if len(df) >= 200 else r50
-    return s20, s50, s200, r20, r50, r200
-
-# ─────────────────────────────────────────
-# CATALYST / EARNINGS AWARENESS
-# ─────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+#  CATALYST / EARNINGS
+# ══════════════════════════════════════════════════════════════
 @st.cache_data(ttl=3600)
 def get_catalyst_data(ticker):
-    result = {
-        "earnings_date": None,
-        "days_to_earnings": None,
-        "ex_div_date": None,
-        "analyst_target": None,
-        "event_risk": "Low",
-        "risk_label": "🟢 Low Risk",
-        "risk_css": "risk-low",
-    }
+    result = {"earnings_date":None,"days_to_earnings":None,"ex_div_date":None,
+              "analyst_target":None,"event_risk":"Low","risk_label":"🟢 Low Risk","risk_css":"risk-low"}
     try:
         stock = yf.Ticker(ticker)
         cal   = stock.calendar
         info  = stock.info or {}
-
-        if cal is not None and not cal.empty:
+        if cal is not None:
             try:
-                if hasattr(cal, "columns") and "Earnings Date" in cal.columns:
+                ed_raw = None
+                if hasattr(cal,"columns") and "Earnings Date" in cal.columns:
                     ed_raw = cal["Earnings Date"].iloc[0]
                 elif isinstance(cal, dict) and "Earnings Date" in cal:
                     ed_raw = cal["Earnings Date"]
-                    if isinstance(ed_raw, list):
-                        ed_raw = ed_raw[0]
-                else:
-                    ed_raw = None
-
+                    if isinstance(ed_raw, list): ed_raw = ed_raw[0]
                 if ed_raw is not None:
-                    if hasattr(ed_raw, "date"):
-                        ed = ed_raw.date()
-                    else:
-                        ed = pd.Timestamp(ed_raw).date()
-                    result["earnings_date"] = ed
+                    ed  = pd.Timestamp(ed_raw).date() if not hasattr(ed_raw,"date") else ed_raw.date()
                     dte = (ed - datetime.now().date()).days
-                    result["days_to_earnings"] = dte
-                    if dte <= 5:
-                        result["event_risk"]  = "High"
-                        result["risk_label"]  = "🔴 High Risk — Earnings ≤5 Days"
-                        result["risk_css"]    = "risk-high"
-                    elif dte <= 14:
-                        result["event_risk"]  = "Moderate"
-                        result["risk_label"]  = "🟡 Moderate Risk — Earnings 6–14 Days"
-                        result["risk_css"]    = "risk-med"
+                    result.update({"earnings_date":ed,"days_to_earnings":dte})
+                    if dte<=5:
+                        result.update({"event_risk":"High","risk_label":"🔴 High Risk — Earnings ≤5d","risk_css":"risk-high"})
+                    elif dte<=14:
+                        result.update({"event_risk":"Moderate","risk_label":"🟡 Moderate — Earnings ≤14d","risk_css":"risk-med"})
             except Exception:
                 pass
-
         try:
-            ex_div = info.get("exDividendDate")
-            if ex_div:
-                result["ex_div_date"] = pd.Timestamp(ex_div, unit="s").date()
+            ex = info.get("exDividendDate")
+            if ex: result["ex_div_date"] = pd.Timestamp(ex,unit="s").date()
         except Exception:
             pass
-
         result["analyst_target"] = info.get("targetMeanPrice")
-
     except Exception:
         pass
     return result
 
-# ─────────────────────────────────────────
-# OPTIONS ANALYSIS
-# ─────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+#  OPTIONS
+# ══════════════════════════════════════════════════════════════
 @st.cache_data(ttl=1800)
 def get_options_data(ticker):
-    result = {
-        "iv": None, "iv_rank": None, "next_exp": None,
-        "has_options": False, "error": None,
-    }
+    result = {"iv":None,"iv_percentile":None,"next_exp":None,"has_options":False,"error":None}
     try:
         stock = yf.Ticker(ticker)
         exps  = stock.options
         if not exps:
-            result["error"] = "No options chain available"
-            return result
-        result["has_options"] = True
-        result["next_exp"]    = exps[0]
-
+            result["error"] = "No options chain available"; return result
+        result.update({"has_options":True,"next_exp":exps[0]})
         chain = stock.option_chain(exps[0])
         calls = chain.calls
         if "impliedVolatility" in calls.columns and not calls.empty:
-            result["iv"] = float(calls["impliedVolatility"].dropna().median()) * 100
+            iv_vals = calls["impliedVolatility"].dropna()
+            result["iv"] = float(iv_vals.median()) * 100
     except Exception as e:
         result["error"] = str(e)
     return result
 
 def options_recommendation(trend_bias, event_risk, iv, rsi_val, atr_pct):
-    if event_risk == "High":
-        return "⚠️ Avoid / Wait", "Earnings within 5 days. IV is inflated — direction unpredictable. Best to wait until after the event."
-
+    if event_risk=="High":
+        return "⚠️ Avoid / Wait", "Earnings ≤5 days — IV inflated, direction binary. Wait for post-earnings."
     if iv is None:
-        if trend_bias == "Bullish" and rsi_val < 65:
-            return "📈 Stock Only / Calls", "No IV data available. Trend bullish, RSI healthy — stock long or ATM calls acceptable."
-        elif trend_bias == "Bearish":
-            return "📉 Puts / Stock Short", "No IV data available. Trend bearish — puts or short stock aligned."
-        else:
-            return "⏳ Wait", "Trend mixed and IV data unavailable. Insufficient data to recommend a vehicle."
+        if trend_bias=="Bullish" and rsi_val<65:
+            return "📈 Stock / Calls", "No IV data. Trend bullish — stock or ATM calls OK."
+        elif trend_bias=="Bearish":
+            return "📉 Puts / Short", "No IV data. Trend bearish — puts or short bias."
+        return "⏳ Wait", "Trend unclear. Insufficient data."
+    if iv>60:
+        if trend_bias=="Bullish":
+            return "🐂 Bull Call Spread", f"IV={iv:.1f}% elevated. Spread limits debit cost while expressing bull view."
+        elif trend_bias=="Bearish":
+            return "🐻 Bear Put Spread", f"IV={iv:.1f}% elevated. Spread keeps premium cost manageable."
+        return "⏳ Wait", f"IV={iv:.1f}% elevated but trend unclear. Not enough conviction."
+    if iv<=30:
+        if trend_bias=="Bullish" and rsi_val<65:
+            return "📈 Calls (ATM/slight ITM)", f"Low IV={iv:.1f}% — options cheap for directional bets."
+        elif trend_bias=="Bearish":
+            return "📉 Puts (ATM)", f"Low IV={iv:.1f}% — cheap puts for downside."
+    if trend_bias=="Bullish" and rsi_val<65:
+        return "📈 Calls", f"Moderate IV={iv:.1f}%, bullish trend, RSI healthy."
+    elif trend_bias=="Bearish":
+        return "📉 Puts", f"Moderate IV={iv:.1f}%, bearish trend."
+    if atr_pct>4:
+        return "🔄 Stock Only", f"High ATR={atr_pct:.1f}% makes options expensive. Prefer stock."
+    return "⏳ Wait", "Setup not clear enough for options."
 
-    if iv > 60 and event_risk in ("Low", "Moderate"):
-        if trend_bias == "Bullish":
-            return "🐂 Bull Call Spread", f"IV at {iv:.1f}% is elevated. Spread caps premium paid while expressing bullish view."
-        elif trend_bias == "Bearish":
-            return "🐻 Bear Put Spread", f"IV at {iv:.1f}% is elevated. Spread reduces premium cost for bearish bet."
-        else:
-            return "⏳ Wait", f"IV elevated ({iv:.1f}%) but trend unclear. Not enough conviction to trade options."
+# ══════════════════════════════════════════════════════════════
+#  SIGNAL CHIP GENERATOR
+# ══════════════════════════════════════════════════════════════
+def generate_signals(df, a, catalyst, mtf_align, info=None):
+    """Return list of (label, color) signal chips."""
+    chips = []
+    price    = a["price"]
+    rsi_val  = a["rsi"]
+    ema20    = a["ema20"]
+    ema50    = a["ema50"]
+    ema200   = a["ema200"]
+    st_dir   = str(df.iloc[-1]["SupertrendDir"])
+    vol      = float(df["Volume"].iloc[-1])
+    vol_avg  = float(df["Vol_EMA20"].iloc[-1]) if "Vol_EMA20" in df.columns else vol
+    vol_ratio= vol / vol_avg if vol_avg>0 else 1.0
+    atr_pct  = a["atr_pct"]
+    bb_pos   = a["bb_pos"]
+    hi52     = float(df["High"].tail(252).max()) if len(df)>=252 else float(df["High"].max())
+    lo52     = float(df["Low"].tail(252).min())  if len(df)>=252 else float(df["Low"].min())
+    pct_from_hi = (price - hi52) / hi52 * 100
+    pct_from_lo = (price - lo52) / lo52 * 100
 
-    if iv <= 30:
-        if trend_bias == "Bullish" and rsi_val < 65:
-            return "📈 Calls (ATM/Slight ITM)", f"Low IV ({iv:.1f}%) — options cheap. ATM calls give good leverage on bullish move."
-        elif trend_bias == "Bearish":
-            return "📉 Puts (ATM)", f"Low IV ({iv:.1f}%) — puts relatively cheap. Favourable for directional bearish bets."
+    # Trend signals
+    if price > ema20 > ema50 > ema200 and st_dir=="up":
+        chips.append(("✅ Perfect Bull Stack","green"))
+    elif price > ema50 and price > ema200 and st_dir=="up":
+        chips.append(("✅ Above All MAs","green"))
+    elif price < ema50 and price < ema200:
+        chips.append(("⚠️ Below Key MAs","red"))
 
-    if trend_bias == "Bullish" and rsi_val < 65 and atr_pct < 3:
-        return "📈 Calls", f"Moderate IV ({iv:.1f}%), bullish trend, RSI healthy."
-    elif trend_bias == "Bearish" and rsi_val > 35:
-        return "📉 Puts", f"Moderate IV ({iv:.1f}%), bearish trend."
-    elif atr_pct > 4:
-        return "🔄 Stock Only", f"High volatility ({atr_pct:.1f}% ATR) makes options expensive. Stock preferred."
+    # 52-week proximity
+    if pct_from_hi > -5:
+        chips.append(("📈 Near 52W High","green"))
+    elif pct_from_lo < 15:
+        chips.append(("📉 Near 52W Low","red"))
 
-    return "⏳ Wait", "Signals not clear enough for a high-conviction options setup."
+    # RSI
+    if rsi_val > 70:
+        chips.append(("⚠️ RSI Overbought","gold"))
+    elif rsi_val < 30:
+        chips.append(("⚠️ RSI Oversold","red"))
+    elif 45 < rsi_val < 65:
+        chips.append(("✅ RSI Healthy","green"))
 
-# ─────────────────────────────────────────
-# MULTI-TIMEFRAME ENGINE
-# ─────────────────────────────────────────
+    # Volume
+    if vol_ratio > 1.5:
+        chips.append((f"🔊 Volume {vol_ratio:.1f}x Avg","blue"))
+    elif vol_ratio < 0.5:
+        chips.append(("🔇 Low Volume","gold"))
+
+    # Bollinger
+    if bb_pos > 85:
+        chips.append(("⚡ Upper BB — Extended","gold"))
+    elif bb_pos < 15:
+        chips.append(("🎯 Lower BB — Oversold Zone","green"))
+
+    # MTF alignment
+    if mtf_align >= 70:
+        chips.append((f"🎯 MTF Aligned {mtf_align}/100","green"))
+    elif mtf_align <= 35:
+        chips.append((f"⚔️ MTF Conflict {mtf_align}/100","red"))
+
+    # Catalyst
+    dte = catalyst.get("days_to_earnings")
+    if dte is not None and dte <= 5:
+        chips.append((f"🔴 Earnings in {dte}d","red"))
+    elif dte is not None and dte <= 14:
+        chips.append((f"🟡 Earnings in {dte}d","gold"))
+
+    # Supertrend
+    if st_dir == "up":
+        chips.append(("🟢 Supertrend UP","green"))
+    else:
+        chips.append(("🔴 Supertrend DOWN","red"))
+
+    # MACD
+    macd_v = float(df.iloc[-1]["MACD"])
+    macd_s = float(df.iloc[-1]["MACD_Signal"])
+    macd_h_prev = float(df.iloc[-2]["MACD_Hist"]) if len(df)>1 else 0
+    macd_h_curr = float(df.iloc[-1]["MACD_Hist"])
+    if macd_v > macd_s and macd_h_curr > 0 and macd_h_curr > macd_h_prev:
+        chips.append(("📈 MACD Bullish Momentum","green"))
+    elif macd_v < macd_s and macd_h_curr < 0 and macd_h_curr < macd_h_prev:
+        chips.append(("📉 MACD Bearish Momentum","red"))
+    elif macd_v > macd_s:
+        chips.append(("📊 MACD Above Signal","green"))
+    else:
+        chips.append(("📊 MACD Below Signal","red"))
+
+    # Institutional (if available)
+    if info:
+        inst = info.get("heldPercentInstitutions")
+        if inst and inst > 0.7:
+            chips.append((f"🏛️ {inst*100:.0f}% Institutional","blue"))
+
+    return chips
+
+# ══════════════════════════════════════════════════════════════
+#  MULTI-TIMEFRAME ENGINE
+# ══════════════════════════════════════════════════════════════
 @st.cache_data(ttl=300)
 def get_mtf_data(ticker):
-    timeframes = ["1m", "5m", "15m", "1h", "4h", "1d"]
-    rows = []
-    bullish_count = 0
-    total_tfs = 0
-
+    timeframes  = ["5m","15m","1h","4h","1d","1wk"]
+    rows        = []
+    bull_total  = 0.0
+    tf_count    = 0
     for tf in timeframes:
-        df_tf, _, err, _ = get_stock_data(ticker, tf)
-        if err or df_tf is None or len(df_tf) < 20:
-            rows.append({"TF": tf, "Trend": "—", "EMA9": "—", "EMA20": "—",
-                         "RSI": "—", "MACD": "—", "ST": "—", "Verdict": "⬜ No Data"})
+        df_tf,_,err,_ = get_stock_data(ticker,tf)
+        if err or df_tf is None or len(df_tf)<20:
+            rows.append({"TF":tf,"EMA9":"—","EMA20":"—","RSI":"—","MACD":"—","ST":"—","Verdict":"⬜ No Data"})
             continue
-
-        lat = df_tf.iloc[-1]
-        p   = float(lat["Close"])
-        e9  = float(lat["EMA9"])
-        e20 = float(lat["EMA20"])
-        r   = float(lat["RSI"])
-        mc  = float(lat["MACD"])
-        ms  = float(lat["MACD_Signal"])
-        sd  = str(lat["SupertrendDir"])
-        vw  = float(lat["VWAP"]) if "VWAP" in df_tf.columns else None
-
-        bull_signals = 0
-        bear_signals = 0
-
-        ema9_lbl  = "▲" if p > e9  else "▼"
-        ema20_lbl = "▲" if p > e20 else "▼"
-        macd_lbl  = "▲" if mc > ms else "▼"
-        st_lbl    = "▲" if sd == "up" else "▼"
-
-        if p > e9:   bull_signals += 1
-        else:        bear_signals += 1
-        if p > e20:  bull_signals += 1
-        else:        bear_signals += 1
-        if mc > ms:  bull_signals += 1
-        else:        bear_signals += 1
-        if sd == "up":  bull_signals += 1
-        else:           bear_signals += 1
-        if r > 50:   bull_signals += 1
-        else:        bear_signals += 1
-        if vw and p > vw:
-            bull_signals += 1
-        elif vw and p < vw:
-            bear_signals += 1
-
-        total = bull_signals + bear_signals
-        if total == 0: total = 1
-        bull_pct = bull_signals / total
-
-        if bull_pct >= 0.75:
-            verdict = "🟢 Bullish"
-            bullish_count += 1
-        elif bull_pct >= 0.5:
-            verdict = "🟡 Mild Bull"
-            bullish_count += 0.5
-        elif bull_pct >= 0.25:
-            verdict = "🟠 Mild Bear"
-        else:
-            verdict = "🔴 Bearish"
-
-        total_tfs += 1
-        rsi_lbl = f"{r:.0f} {'↑' if r > 55 else '↓' if r < 45 else '→'}"
-
-        rows.append({
-            "TF": tf, "EMA9": ema9_lbl, "EMA20": ema20_lbl,
-            "RSI": rsi_lbl, "MACD": macd_lbl, "ST": st_lbl, "Verdict": verdict,
-        })
-
-    align_score = int((bullish_count / max(total_tfs, 1)) * 100)
-
-    if align_score >= 75:
-        primary_bias   = "Strong Bullish"
-        confirmation   = "Multiple timeframes confirm uptrend"
-        trigger        = "Enter on 15m/1h pullback to EMA9 or EMA20"
-        conflict_note  = "Watch for 1d RSI if overbought"
-    elif align_score >= 55:
-        primary_bias   = "Mild Bullish"
-        confirmation   = "Short TFs lean bull, higher TFs mixed"
-        trigger        = "Wait for 1h close above EMA20 before entry"
-        conflict_note  = "Some TF conflict — size down, tighter stop"
-    elif align_score >= 45:
-        primary_bias   = "Neutral / Choppy"
-        confirmation   = "No clear multi-TF alignment"
-        trigger        = "Avoid — wait for resolution"
-        conflict_note  = "Significant TF conflict — high whipsaw risk"
-    elif align_score >= 25:
-        primary_bias   = "Mild Bearish"
-        confirmation   = "Most TFs lean bearish"
-        trigger        = "Avoid longs. Watch for short entry on bounces"
-        conflict_note  = "1d may still be transitioning"
+        lat  = df_tf.iloc[-1]
+        p,e9,e20 = float(lat["Close"]),float(lat["EMA9"]),float(lat["EMA20"])
+        r,mc,ms  = float(lat["RSI"]),float(lat["MACD"]),float(lat["MACD_Signal"])
+        sd       = str(lat["SupertrendDir"])
+        vw       = float(lat["VWAP"]) if "VWAP" in df_tf.columns else None
+        bull = 0
+        if p>e9:  bull+=1
+        if p>e20: bull+=1
+        if mc>ms: bull+=1
+        if sd=="up": bull+=1
+        if r>50:  bull+=1
+        if vw and p>vw: bull+=1
+        denom = 6
+        pct = bull/denom
+        if pct>=0.75:   v="🟢 Bullish"; bull_total+=1.0
+        elif pct>=0.5:  v="🟡 Mild Bull"; bull_total+=0.5
+        elif pct>=0.25: v="🟠 Mild Bear"
+        else:           v="🔴 Bearish"
+        tf_count+=1
+        rows.append({"TF":tf,"EMA9":"▲" if p>e9 else "▼","EMA20":"▲" if p>e20 else "▼",
+                     "RSI":f"{r:.0f}","MACD":"▲" if mc>ms else "▼",
+                     "ST":"▲" if sd=="up" else "▼","Verdict":v})
+    align = int((bull_total/max(tf_count,1))*100)
+    if align>=75:
+        pb="Strong Bullish"; trig="Buy pullbacks to EMA9/20"; cf="Watch overbought RSI on 1d"
+    elif align>=55:
+        pb="Mild Bullish"; trig="Wait for 1h close above EMA20"; cf="Size down — some TF conflict"
+    elif align>=45:
+        pb="Neutral/Choppy"; trig="Avoid — wait for resolution"; cf="High whipsaw risk"
+    elif align>=25:
+        pb="Mild Bearish"; trig="Avoid longs; watch bounces for shorts"; cf="1d may still transition"
     else:
-        primary_bias   = "Strong Bearish"
-        confirmation   = "All timeframes aligned bearish"
-        trigger        = "Short bias. Enter on failed bounces to EMA9/20"
-        conflict_note  = "Confirm with volume — no catching falling knives"
+        pb="Strong Bearish"; trig="Short on failed bounces to EMA20"; cf="Confirm with volume"
+    return {"rows":rows,"alignment_score":align,"primary_bias":pb,"trigger":trig,"conflict_note":cf}
 
-    return {
-        "rows": rows,
-        "alignment_score": align_score,
-        "primary_bias": primary_bias,
-        "confirmation": confirmation,
-        "trigger": trigger,
-        "conflict_note": conflict_note,
+# ══════════════════════════════════════════════════════════════
+#  SCORING ENGINE — point-based, fully differentiated
+# ══════════════════════════════════════════════════════════════
+def score_fundamentals(info):
+    pts = 0.0
+    rev_g  = info.get("revenueGrowth")
+    gm     = info.get("grossMargins")
+    nm     = info.get("profitMargins")
+    op_m   = info.get("operatingMargins")
+    pe     = info.get("trailingPE")
+    fwd_pe = info.get("forwardPE")
+    peg    = info.get("pegRatio")
+    eps    = info.get("trailingEps",0) or 0
+    debt   = info.get("totalDebt",0) or 0
+    cash   = info.get("totalCash",0) or 0
+    fcf    = info.get("freeCashflow",0) or 0
+    roe    = info.get("returnOnEquity",0) or 0
+    eps_g  = info.get("earningsGrowth",0) or 0
+
+    # Revenue growth
+    if rev_g is not None:
+        if rev_g>0.25:   pts+=1.0
+        elif rev_g>0.15: pts+=0.75
+        elif rev_g>0.05: pts+=0.5
+        elif rev_g>0:    pts+=0.25
+        else:            pts-=0.5
+
+    # Gross margin
+    if gm is not None:
+        if gm>0.65:   pts+=1.0
+        elif gm>0.50: pts+=0.75
+        elif gm>0.35: pts+=0.5
+        elif gm>0.20: pts+=0.25
+        else:         pts-=0.25
+
+    # Net margin
+    if nm is not None:
+        if nm>0.25:   pts+=0.75
+        elif nm>0.15: pts+=0.5
+        elif nm>0.05: pts+=0.25
+        elif nm<0:    pts-=0.75
+
+    # EPS growth (quarterly)
+    if eps_g>0.20:   pts+=0.5
+    elif eps_g>0.10: pts+=0.25
+    elif eps_g<-0.10: pts-=0.25
+
+    # FCF
+    if fcf>0: pts+=0.5
+    elif fcf<0: pts-=0.25
+
+    # Balance sheet
+    net_cash = cash - debt
+    if net_cash>0: pts+=0.5
+    else: pts-=0.25
+
+    # P/E
+    if pe is not None and pe>0:
+        if pe<18:   pts+=0.5
+        elif pe<30: pts+=0.25
+        elif pe>70: pts-=0.5
+
+    # ROE
+    if roe>0.25: pts+=0.5
+    elif roe>0.15: pts+=0.25
+    elif roe<0: pts-=0.25
+
+    return max(1.0, min(5.0, round(pts, 1)))
+
+def score_technicals(df):
+    if df is None or len(df)<20:
+        return 3.0, "Neutral", {}
+    lat    = df.iloc[-1]
+    price  = float(lat["Close"])
+    ema9   = float(lat["EMA9"])
+    ema20  = float(lat["EMA20"])
+    ema50  = float(lat["EMA50"])
+    ema200 = float(lat["EMA200"])
+    rsi_v  = float(lat["RSI"])
+    macd_v = float(lat["MACD"])
+    macd_s = float(lat["MACD_Signal"])
+    st_dir = str(lat["SupertrendDir"])
+    vwap_v = float(lat["VWAP"])
+    vol    = float(lat["Volume"])
+    vol_avg= float(lat.get("Vol_EMA20", vol))
+
+    pts = 0.0
+    if price>ema200: pts+=1.0
+    if price>ema50:  pts+=0.75
+    if price>ema20:  pts+=0.5
+    if price>ema9:   pts+=0.25
+    if st_dir=="up": pts+=0.75
+    if macd_v>macd_s: pts+=0.5
+    if 45<rsi_v<65:  pts+=0.5
+    elif 65<=rsi_v<75: pts+=0.15
+    elif rsi_v>=75:  pts-=0.25
+    elif rsi_v<30:   pts-=0.5
+    if price>vwap_v: pts+=0.25
+    if vol_avg>0 and vol>vol_avg*1.2: pts+=0.25
+
+    # Check for EMA alignment (adds bonus)
+    if ema9>ema20>ema50>ema200 and price>ema9: pts+=0.5   # perfect stack bonus
+
+    trend = "Bullish" if pts>=2.5 else ("Bearish" if pts<1.2 else "Neutral")
+    return max(1.0, min(5.0, round(pts, 1))), trend, {
+        "price":price,"ema9":ema9,"ema20":ema20,"ema50":ema50,"ema200":ema200,
+        "rsi":rsi_v,"macd":macd_v,"macd_sig":macd_s,"st_dir":st_dir,
+        "vwap":vwap_v,"vol_ratio":vol/vol_avg if vol_avg>0 else 1.0
     }
 
-# ─────────────────────────────────────────
-# WATCHLIST NOTE GENERATOR
-# ─────────────────────────────────────────
-def generate_watchlist_note(ticker, df_w, catalyst_days, rsi_w, st_dir_w, trend_w, align_score=None):
-    """Generate a human-readable note explaining the watchlist signal."""
-    price_w  = float(df_w.iloc[-1]["Close"])
-    ema20_w  = float(df_w.iloc[-1]["EMA20"]) if "EMA20" in df_w.columns else price_w
-    ema50_w  = float(df_w.iloc[-1].get("EMA50", price_w))
-    macd_val = float(df_w.iloc[-1]["MACD"]) if "MACD" in df_w.columns else 0
-    macd_sig = float(df_w.iloc[-1]["MACD_Signal"]) if "MACD_Signal" in df_w.columns else 0
-
-    parts = []
-
-    # Earnings risk
-    if catalyst_days is not None and catalyst_days <= 5:
-        return f"⚠️ Avoid: earnings in {catalyst_days} days — high event risk"
-    elif catalyst_days is not None and catalyst_days <= 14:
-        parts.append(f"earnings in {catalyst_days}d")
-
-    # Trend
-    if st_dir_w == "up" and price_w > ema20_w and rsi_w < 65:
-        label = "Bullish"
-        parts.append(f"price > EMA20 (${ema20_w:.2f})")
-        parts.append(f"RSI {rsi_w:.0f}")
-        parts.append("Supertrend bullish")
-        if catalyst_days and catalyst_days > 14:
-            parts.append("no earnings risk")
-    elif st_dir_w == "down" and price_w < ema20_w:
-        label = "Bearish"
-        parts.append(f"price < EMA20 (${ema20_w:.2f})")
-        parts.append(f"RSI {rsi_w:.0f}")
-        parts.append("Supertrend bearish")
-    elif price_w > ema20_w and st_dir_w == "down":
-        label = "Wait"
-        parts.append("lower TF bullish but Supertrend still down")
-    elif rsi_w > 70:
-        label = "Wait"
-        parts.append(f"RSI overbought at {rsi_w:.0f}")
-    elif rsi_w < 30:
-        label = "Oversold"
-        parts.append(f"RSI oversold at {rsi_w:.0f} — watch for bounce")
-    else:
-        label = "Neutral"
-        parts.append("mixed signals")
-
-    if macd_val > macd_sig:
-        parts.append("MACD ▲")
-    else:
-        parts.append("MACD ▼")
-
-    note = f"{label}: " + ", ".join(parts)
-    return note[:120]
-
-# ─────────────────────────────────────────
-# POSITION SIZING CALCULATOR
-# ─────────────────────────────────────────
-def calc_position_size(account_size, cash_avail, risk_pct, entry, stop, target1, target2, asset_type, atr_val=None):
-    if entry <= 0 or stop <= 0 or stop >= entry:
-        return None, "⚠️ Stop must be below entry and both > 0."
-
-    max_risk_dollars = account_size * (risk_pct / 100)
-    risk_per_unit    = entry - stop
-    units            = max_risk_dollars / risk_per_unit if risk_per_unit > 0 else 0
-
-    if asset_type == "Option":
-        units = int(units / 100)
-        if units < 1:
-            units = 1
-        pos_value = units * 100 * entry
-        label_unit = "contracts"
-    else:
-        units     = int(units)
-        pos_value = units * entry
-        label_unit = "shares"
-
-    rr1 = (target1 - entry) / risk_per_unit if risk_per_unit > 0 and target1 > entry else 0
-    rr2 = (target2 - entry) / risk_per_unit if risk_per_unit > 0 and target2 > entry else 0
-
-    warnings = []
-    if pos_value > cash_avail:
-        warnings.append(f"⚠️ Position value ${pos_value:,.2f} exceeds available cash ${cash_avail:,.2f}. Scale down.")
-    if atr_val:
-        atr_pct_stop = (risk_per_unit / atr_val)
-        if atr_pct_stop < 0.5:
-            warnings.append(f"⚠️ Stop is very tight ({atr_pct_stop:.1f}x ATR). High chance of stop-out on normal noise.")
-        elif atr_pct_stop > 3:
-            warnings.append(f"⚠️ Stop is wide ({atr_pct_stop:.1f}x ATR). Position value will be small.")
-    if rr1 > 0 and rr1 < 1.5:
-        warnings.append(f"⚠️ R:R to Target 1 is only {rr1:.2f}x — below 1.5x minimum. Consider a better entry or wider target.")
-
-    explanations = [
-        f"📘 **Max $ Risk** = Account ${account_size:,.0f} × {risk_pct}% = ${max_risk_dollars:,.2f} — the most you'll lose if stopped out.",
-        f"📘 **Risk/Unit** = Entry ${entry:.2f} − Stop ${stop:.2f} = ${risk_per_unit:.2f} per share.",
-        f"📘 **Position Size** = ${max_risk_dollars:.2f} ÷ ${risk_per_unit:.2f} = {units} {label_unit} (capped by available cash).",
-        f"📘 **R:R to T1** = (${target1:.2f} − ${entry:.2f}) ÷ ${risk_per_unit:.2f} = {rr1:.2f}x. Aim for ≥ 2x for strong trades.",
-    ]
-
-    return {
-        "max_risk_dollars": max_risk_dollars,
-        "units": units,
-        "label_unit": label_unit,
-        "pos_value": pos_value,
-        "risk_per_unit": risk_per_unit,
-        "rr1": rr1,
-        "rr2": rr2,
-        "explanations": explanations,
-    }, "\n".join(warnings) if warnings else None
-
-# ─────────────────────────────────────────
-# JOURNAL HELPERS
-# ─────────────────────────────────────────
-def load_journal():
-    if not os.path.exists(JOURNAL_FILE):
-        return pd.DataFrame(columns=JOURNAL_COLS)
-    try:
-        df = pd.read_csv(JOURNAL_FILE)
-        for col in JOURNAL_COLS:
-            if col not in df.columns:
-                df[col] = ""
-        return df
-    except Exception:
-        return pd.DataFrame(columns=JOURNAL_COLS)
-
-def save_trade(trade_dict):
-    exists = os.path.exists(JOURNAL_FILE)
-    with open(JOURNAL_FILE, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=JOURNAL_COLS)
-        if not exists:
-            writer.writeheader()
-        row = {col: trade_dict.get(col, "") for col in JOURNAL_COLS}
-        writer.writerow(row)
-
-def journal_analytics(df):
-    if df.empty or "result" not in df.columns:
-        return {}
-    df = df.copy()
-    df["pnl"] = pd.to_numeric(df["pnl"], errors="coerce").fillna(0)
-    df["alignment_score"] = pd.to_numeric(df["alignment_score"], errors="coerce").fillna(0)
-
-    total   = len(df)
-    wins    = df[df["result"].str.lower() == "win"]
-    losses  = df[df["result"].str.lower() == "loss"]
-    win_rate = len(wins) / total * 100 if total > 0 else 0
-    avg_win  = wins["pnl"].mean() if not wins.empty else 0
-    avg_loss = losses["pnl"].mean() if not losses.empty else 0
-    total_pnl = df["pnl"].sum()
-    gross_profit = wins["pnl"].sum()
-    gross_loss   = abs(losses["pnl"].sum())
-    profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf")
-    expectancy = (win_rate / 100 * avg_win) + ((1 - win_rate / 100) * avg_loss)
-
-    insights = []
-    near_earn = df[df["catalyst_state"].str.contains("High", na=False)]
-    far_earn  = df[~df["catalyst_state"].str.contains("High", na=False)]
-    if len(near_earn) >= 2 and len(far_earn) >= 2:
-        wr_near = len(near_earn[near_earn["result"].str.lower() == "win"]) / len(near_earn) * 100
-        wr_far  = len(far_earn[far_earn["result"].str.lower() == "win"]) / len(far_earn) * 100
-        if wr_near < wr_far - 10:
-            insights.append(f"📉 Win rate drops near earnings: {wr_near:.0f}% vs {wr_far:.0f}% normally. Avoid high-risk earnings windows.")
-
-    high_align = df[df["alignment_score"] >= 70]
-    low_align  = df[df["alignment_score"] < 50]
-    if len(high_align) >= 2 and len(low_align) >= 2:
-        wr_h = len(high_align[high_align["result"].str.lower() == "win"]) / len(high_align) * 100
-        wr_l = len(low_align[low_align["result"].str.lower() == "win"]) / len(low_align) * 100
-        if wr_h > wr_l + 10:
-            insights.append(f"✅ Trades with alignment ≥70 win {wr_h:.0f}% vs {wr_l:.0f}% for <50. Prioritize high-alignment setups.")
-
-    # Best trades insight
-    if "timeframe" in df.columns:
-        tf_wins = df[df["result"].str.lower() == "win"].groupby("timeframe").size()
-        if not tf_wins.empty:
-            best_tf = tf_wins.idxmax()
-            insights.append(f"🕐 Most wins come from the **{best_tf}** timeframe. Focus there.")
-
-    return {
-        "total": total, "win_rate": win_rate, "avg_win": avg_win,
-        "avg_loss": avg_loss, "total_pnl": total_pnl,
-        "profit_factor": profit_factor, "expectancy": expectancy, "insights": insights,
-    }
-
-# ─────────────────────────────────────────
-# UTILITY FUNCTIONS
-# ─────────────────────────────────────────
-def fmt_large(n):
-    if n is None: return "N/A"
-    if n >= 1e12: return f"${n/1e12:.2f}T"
-    if n >= 1e9:  return f"${n/1e9:.2f}B"
-    if n >= 1e6:  return f"${n/1e6:.2f}M"
-    return f"${n:,.0f}"
-
-def score_badge(score):
-    if score >= 4: return "strong", "🟢 Strong"
-    if score >= 3: return "avg",    "🟡 Average"
-    return "weak", "🔴 Weak"
-
-# ─────────────────────────────────────────
-# 6-PILLAR ANALYSIS
-# ─────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+#  FULL ANALYSIS ENGINE
+# ══════════════════════════════════════════════════════════════
 def analyze(df, info, ticker, sentiment_score):
-    latest  = df.iloc[-1]
-    price   = float(latest["Close"])
-    ema9    = float(latest["EMA9"])
-    ema20   = float(latest["EMA20"])
-    ema50   = float(latest["EMA50"])
-    ema200  = float(latest["EMA200"])
-    rsi_val = float(latest["RSI"])
-    vwap_v  = float(latest["VWAP"])
-    st_val  = float(latest["Supertrend"])
-    st_dir  = str(latest["SupertrendDir"])
-    atr_val = float(latest["ATR"]) if not np.isnan(float(latest["ATR"])) else price * 0.02
-    macd_v  = float(latest["MACD"])
-    macd_s  = float(latest["MACD_Signal"])
-    bb_u    = float(latest["BB_Upper"])
-    bb_l    = float(latest["BB_Lower"])
-    bb_m    = float(latest["BB_Mid"])
+    lat    = df.iloc[-1]
+    price  = float(lat["Close"])
+    ema9   = float(lat["EMA9"])
+    ema20  = float(lat["EMA20"])
+    ema50  = float(lat["EMA50"])
+    ema200 = float(lat["EMA200"])
+    rsi_v  = float(lat["RSI"])
+    vwap_v = float(lat["VWAP"])
+    st_val = float(lat["Supertrend"])
+    st_dir = str(lat["SupertrendDir"])
+    atr_v  = float(lat["ATR"]) if not np.isnan(float(lat["ATR"])) else price*0.02
+    macd_v = float(lat["MACD"])
+    macd_s = float(lat["MACD_Signal"])
+    bb_u   = float(lat["BB_Upper"])
+    bb_l   = float(lat["BB_Lower"])
+    bb_m   = float(lat["BB_Mid"])
+    vol    = float(lat["Volume"])
+    vol_avg= float(lat.get("Vol_EMA20", vol))
+    bb_pos = ((price-bb_l)/(bb_u-bb_l)*100) if (bb_u-bb_l)>0 else 50
 
-    revenue      = info.get("totalRevenue")
-    rev_growth   = info.get("revenueGrowth")
-    gross_margin = info.get("grossMargins")
-    op_margin    = info.get("operatingMargins")
-    net_margin   = info.get("profitMargins")
-    pe           = info.get("trailingPE")
-    fwd_pe       = info.get("forwardPE")
-    peg          = info.get("pegRatio")
-    eps          = info.get("trailingEps")
-    debt         = info.get("totalDebt")
-    cash         = info.get("totalCash")
-    fcf          = info.get("freeCashflow")
-    roe          = info.get("returnOnEquity")
-    long_name    = info.get("longName", ticker)
-    sector       = info.get("sector", "")
-    market_cap   = info.get("marketCap")
+    s1,s2,s3,r1,r2,r3 = get_key_levels(df)
 
-    s20, s50, s200, r20, r50, r200 = get_levels(df)
+    # Scoring
+    fund_score = score_fundamentals(info)
+    tech_score, trend_bias, tech_vals = score_technicals(df)
 
-    # ── PILLAR 1: FUNDAMENTALS ─────────────────────────────────
-    fund_score   = 3
-    fund_details = []
-    fund_issues  = []
+    # Risk score
+    daily_ret  = df["Close"].pct_change().dropna()
+    vol_daily  = float(daily_ret.std())*100
+    max_dd     = float(((df["Close"]/df["Close"].cummax())-1).min())*100
+    if vol_daily<1.0:   risk_score=4.5
+    elif vol_daily<2.0: risk_score=3.5
+    elif vol_daily<3.0: risk_score=3.0
+    elif vol_daily<4.0: risk_score=2.5
+    else:               risk_score=2.0
+    if max_dd<-40: risk_score=max(1.5, risk_score-0.5)
 
-    if revenue:
-        fund_details.append(f"Revenue: **{fmt_large(revenue)}**")
-    if rev_growth is not None:
-        pct = rev_growth * 100
-        if pct > 15:
-            fund_details.append(f"Revenue Growth: **{pct:.1f}%** ✅")
-            fund_score += 0.5
-        elif pct > 0:
-            fund_details.append(f"Revenue Growth: **{pct:.1f}%** (moderate)")
-        else:
-            fund_details.append(f"Revenue Growth: **{pct:.1f}%** ⚠️")
-            fund_issues.append(f"Revenue is shrinking ({pct:.1f}%)")
-            fund_score -= 0.5
-    if gross_margin is not None:
-        gm  = gross_margin * 100
-        lbl = "✅ high" if gm > 50 else ("moderate" if gm > 30 else "⚠️ low")
-        fund_details.append(f"Gross Margin: **{gm:.1f}%** ({lbl})")
-        if gm < 30:
-            fund_issues.append(f"Low gross margin {gm:.1f}% = thin pricing power")
-            fund_score -= 0.5
-    if net_margin is not None:
-        nm  = net_margin * 100
-        lbl = "✅" if nm > 15 else ("⚠️" if nm < 0 else "")
-        fund_details.append(f"Net Margin: **{nm:.1f}%** {lbl}")
-        if nm < 0:
-            fund_issues.append(f"Company losing money (net margin {nm:.1f}%)")
-            fund_score -= 1
-    if pe is not None:
-        lbl = "elevated" if pe > 40 else ("reasonable" if pe < 20 else "moderate")
-        fund_details.append(f"P/E: **{pe:.1f}x** ({lbl})")
-        if pe > 60:
-            fund_issues.append(f"P/E of {pe:.1f}x is very high — priced for perfection")
-            fund_score -= 0.5
-    if fwd_pe is not None:
-        fund_details.append(f"Fwd P/E: **{fwd_pe:.1f}x**")
-    if peg is not None:
-        lbl = "✅ cheap vs growth" if peg < 1.5 else ("⚠️ expensive vs growth" if peg > 3 else "fair")
-        fund_details.append(f"PEG: **{peg:.2f}** ({lbl})")
-        if peg > 3:
-            fund_issues.append(f"PEG of {peg:.2f} means paying a lot for expected growth")
-    if eps is not None:
-        fund_details.append(f"EPS (TTM): **${eps:.2f}**")
-    if cash is not None and debt is not None:
-        net_cash = cash - debt
-        if net_cash > 0:
-            fund_details.append(f"Net Cash: **{fmt_large(net_cash)}** ✅")
-            fund_score += 0.5
-        else:
-            fund_details.append(f"Net Debt: **{fmt_large(abs(net_cash))}** ⚠️")
-            fund_issues.append(f"Debt exceeds cash by {fmt_large(abs(net_cash))}")
-            fund_score -= 0.5
-    if fcf is not None:
-        lbl = "✅ positive" if fcf > 0 else "⚠️ negative"
-        fund_details.append(f"Free Cash Flow: **{fmt_large(fcf)}** ({lbl})")
-        if fcf < 0:
-            fund_issues.append("Negative free cash flow — burns more cash than it generates")
-            fund_score -= 0.5
-    if roe is not None:
-        roe_pct = roe * 100
-        lbl = "✅ strong" if roe_pct > 15 else ("⚠️ weak" if roe_pct < 5 else "moderate")
-        fund_details.append(f"ROE: **{roe_pct:.1f}%** ({lbl})")
+    # Plan score
+    if trend_bias=="Bullish" and sentiment_score>=55:  plan_score=4.0
+    elif trend_bias=="Bullish":                        plan_score=3.5
+    elif trend_bias=="Bearish" and sentiment_score<40: plan_score=1.5
+    elif trend_bias=="Bearish":                        plan_score=2.0
+    else:                                              plan_score=2.5
 
-    fund_score    = max(1, min(5, round(fund_score)))
-    fund_why_weak = ("**Why fundamentals are weak:**\n" + "\n".join(f"- {x}" for x in fund_issues)) if fund_issues else ""
-    fund_summary  = "\n".join(f"- {d}" for d in fund_details) if fund_details else "Fundamental data not available for this ticker."
-
-    # ── PILLAR 2: TECHNICALS ──────────────────────────────────
-    tech_score   = 3
-    tech_details = []
-    tech_issues  = []
-    trend_bias   = "Neutral"
-
-    tech_details.append(f"Price: **${price:.2f}**")
-    tech_details.append(f"EMA9: **${ema9:.2f}** | EMA20: **${ema20:.2f}** | EMA50: **${ema50:.2f}** | EMA200: **${ema200:.2f}**")
-    tech_details.append(f"RSI (14): **{rsi_val:.1f}**")
-    tech_details.append(f"MACD: **{macd_v:.3f}** vs Signal: **{macd_s:.3f}**")
-    tech_details.append(f"VWAP: **${vwap_v:.2f}**")
-    tech_details.append(f"ATR (14): **${atr_val:.2f}** (daily expected move)")
-    tech_details.append(f"Bollinger Bands: **${bb_l:.2f} — ${bb_m:.2f} — ${bb_u:.2f}**")
-    tech_details.append(f"Supertrend: **{st_dir.upper()}** at **${st_val:.2f}**")
-
-    bullish_stack = price > ema9 > ema20 > ema50 and price > ema200 and price > st_val
-    bearish_stack = price < ema9 < ema20 < ema50 and price < ema200 and price < st_val
-
-    if bullish_stack:
-        tech_score = 5; trend_bias = "Bullish"
-        tech_details.append("✅ **Perfect bull stack**: Price > EMA9 > EMA20 > EMA50 > EMA200. Supertrend UP.")
-    elif price > ema20 and price > ema50 and price > ema200:
-        tech_score = 4; trend_bias = "Bullish"
-        tech_details.append("✅ **Bullish**: Price above all key MAs.")
-    elif bearish_stack:
-        tech_score = 1; trend_bias = "Bearish"
-        tech_issues.append("Price below EMA9 < EMA20 < EMA50 < EMA200. Supertrend DOWN.")
-    elif price < ema50 and price < ema200:
-        tech_score = 2; trend_bias = "Bearish"
-        tech_issues.append(f"Price ${price:.2f} below EMA50 (${ema50:.2f}) and EMA200 (${ema200:.2f})")
-
-    if rsi_val > 70:
-        tech_details.append(f"⚠️ **RSI {rsi_val:.1f} is overbought** — short-term pullback risk")
-    elif rsi_val < 30:
-        tech_details.append(f"⚠️ **RSI {rsi_val:.1f} is oversold** — potential bounce zone")
+    # Entry/Exit levels
+    if trend_bias=="Bullish":
+        entry_low  = min(ema20, ema50)*0.999
+        entry_high = min(price*1.005, ema20*1.01)
+        stop_loss  = max(s1 - atr_v*0.5, price - atr_v*2.0)
     else:
-        tech_details.append(f"✅ RSI {rsi_val:.1f} in healthy range")
+        entry_low  = price*0.99
+        entry_high = price*1.005
+        stop_loss  = price - atr_v*1.5
 
-    if macd_v > macd_s:
-        tech_details.append("✅ MACD above signal — bullish momentum")
-    else:
-        tech_details.append("⚠️ MACD below signal — bearish momentum")
+    risk_per_sh = max(price - stop_loss, atr_v*0.5)
+    target_1    = price + risk_per_sh*2.0
+    target_2    = price + risk_per_sh*3.5
+    rr_1        = (target_1-price)/risk_per_sh if risk_per_sh>0 else 0
 
-    vwap_pct = ((price - vwap_v) / vwap_v) * 100
-    if price > vwap_v:
-        tech_details.append(f"✅ Price {vwap_pct:+.1f}% above VWAP — buyers in control")
-    else:
-        tech_details.append(f"⚠️ Price {vwap_pct:+.1f}% below VWAP — sellers in control")
+    ee_score = 4.0 if (trend_bias=="Bullish" and rr_1>=2.0) else (3.0 if rr_1>=1.5 else 2.0)
 
-    bb_pos = ((price - bb_l) / (bb_u - bb_l)) * 100 if (bb_u - bb_l) > 0 else 50
-    tech_details.append(f"BB position: **{bb_pos:.0f}%** of band ({'upper zone' if bb_pos > 80 else 'lower zone' if bb_pos < 20 else 'mid zone'})")
+    # Mindset score
+    if vol_daily>3.5:  mind_score=2.5
+    elif vol_daily>2.0: mind_score=3.5
+    else:              mind_score=4.5
 
-    tech_score    = max(1, min(5, tech_score))
-    tech_why_weak = ("**Why technicals are weak:**\n" + "\n".join(f"- {x}" for x in tech_issues)) if tech_issues else ""
-    tech_summary  = "\n".join(f"- {d}" for d in tech_details)
+    scores = {"Fundamentals":fund_score,"Technicals":tech_score,
+              "Risk":risk_score,"Plan":plan_score,
+              "Entry/Exit":ee_score,"Mindset":mind_score}
+    overall = round(sum(scores.values())/len(scores), 2)
 
-    # ── PILLAR 3: RISK MANAGEMENT ─────────────────────────────
-    daily_ret    = df["Close"].pct_change().dropna()
-    vol          = float(daily_ret.std()) if not daily_ret.empty else 0
-    vol_pct      = vol * 100
-    max_drawdown = float(((df["Close"] / df["Close"].cummax()) - 1).min()) * 100
-
-    risk_details = [
-        f"Daily Volatility (std): **{vol_pct:.2f}%**",
-        f"ATR-based daily move: **±${atr_val:.2f}** (**{atr_val/price*100:.1f}%** of price)",
-        f"Max Drawdown (period): **{max_drawdown:.1f}%**",
-        f"Implied Stop Loss level: **${price - atr_val * 1.5:.2f}** (1.5x ATR below price)",
-    ]
-
-    if vol < 0.01:
-        risk_score   = 4
-        risk_summary = f"Low volatility ({vol_pct:.2f}%/day). Supports cleaner entries and stops."
-        pos_size     = "Normal sizing appropriate."
-    elif vol < 0.025:
-        risk_score   = 3
-        risk_summary = f"Moderate volatility ({vol_pct:.2f}%/day). Respect support levels."
-        pos_size     = "Moderate sizing — use ATR-based stops."
-    else:
-        risk_score   = 2
-        risk_summary = f"High volatility ({vol_pct:.2f}%/day). Widen stops or reduce size."
-        pos_size     = f"Reduce position size — daily swings of ~${atr_val:.2f} expected."
-
-    if max_drawdown < -40:
-        risk_details.append(f"⚠️ Max drawdown of {max_drawdown:.1f}% means this stock can cut in half")
-        risk_score = max(1, risk_score - 1)
-
-    risk_details.append(f"Suggested position size: **{pos_size}**")
-    risk_details.append("Risk note: Earnings, macro events not captured by historical volatility.")
-    risk_why_weak = "" if risk_score >= 3 else f"**Why risk is elevated:** Volatility of {vol_pct:.2f}%/day with max drawdown {max_drawdown:.1f}%"
-    risk_full     = "\n".join(f"- {d}" for d in risk_details)
-
-    # ── PILLAR 4: TRADING PLAN ────────────────────────────────
-    if trend_bias == "Bullish" and sentiment_score >= 50:
-        plan_score   = 4
-        plan_summary = f"Bullish trend + positive sentiment ({sentiment_score}/100). Buy pullbacks to EMA20 (${ema20:.2f}) or EMA50 (${ema50:.2f}). Hold while Supertrend UP and price stays above EMA50."
-    elif trend_bias == "Bullish":
-        plan_score   = 3
-        plan_summary = f"Trend bullish but sentiment mixed ({sentiment_score}/100). Wait for pullbacks. EMA20 (${ema20:.2f}) is key support."
-    elif trend_bias == "Bearish":
-        plan_score   = 2
-        plan_summary = f"Bearish trend (price below EMA50 ${ema50:.2f}). Avoid longs unless price reclaims EMA50. Wait for structure shift."
-    else:
-        plan_score   = 3
-        plan_summary = f"Mixed signals. EMA50 (${ema50:.2f}) and EMA200 (${ema200:.2f}) are critical levels to watch for confirmation."
-
-    # ── PILLAR 5: ENTRY / EXIT ────────────────────────────────
-    entry_low    = min(ema20, ema50) if trend_bias == "Bullish" else min(ema50, ema200)
-    entry_high   = max(min(price, ema20), min(price, ema50))
-    stop_loss    = min(s20, price - atr_val * 1.5)
-    target_1     = max(r20 * 1.02, price + (price - stop_loss) * 1.5)
-    target_2     = max(r50 * 1.03, price + (price - stop_loss) * 3.0)
-    risk_per_sh  = price - stop_loss
-    reward_1     = target_1 - price
-    rr_1         = reward_1 / risk_per_sh if risk_per_sh > 0 else 0
-
-    # Check if price is extended or near support
-    dist_to_support = (price - s20) / price * 100
-    dist_to_resist  = (r20 - price) / price * 100
-    if dist_to_support < 2:
-        position_status = "Near support — potential entry zone"
-        suggested_action = "pullback entry"
-    elif dist_to_resist < 2:
-        position_status = "Near resistance — price may be extended"
-        suggested_action = "wait for breakout confirmation"
-    elif bb_pos > 80:
-        position_status = "Upper Bollinger Band — extended"
-        suggested_action = "wait for pullback"
-    elif bb_pos < 20:
-        position_status = "Lower Bollinger Band — oversold zone"
-        suggested_action = "watch for bounce entry"
-    elif trend_bias == "Bullish" and rsi_val < 60:
-        position_status = "Mid-range with bullish bias"
-        suggested_action = "breakout entry or pullback entry"
-    else:
-        position_status = "No clear extreme"
-        suggested_action = "wait"
-
-    ee_score   = 4 if trend_bias == "Bullish" else 3
-    ee_details = [
-        f"Entry Zone: **${entry_low:.2f} — ${entry_high:.2f}**",
-        f"Stop Loss: **${stop_loss:.2f}** ({((price-stop_loss)/price*100):.1f}% risk from current price)",
-        f"Target 1: **${target_1:.2f}** ({((target_1-price)/price*100):.1f}% upside) | R:R = **{rr_1:.1f}x**",
-        f"Target 2: **${target_2:.2f}** ({((target_2-price)/price*100):.1f}% upside) | R:R = **{(target_2-price)/risk_per_sh:.1f}x**",
-        f"Support 20-day: **${s20:.2f}** | Resistance 20-day: **${r20:.2f}**",
-        f"Support 50-day: **${s50:.2f}** | Resistance 50-day: **${r50:.2f}**",
-        f"Position Status: **{position_status}**",
-        f"Suggested Action: **{suggested_action}**",
-    ]
-    ee_summary  = "\n".join(f"- {d}" for d in ee_details)
-    ee_why_weak = "" if ee_score >= 3 else "R:R below 1.5x — not ideal entry conditions."
-
-    # ── PILLAR 6: MINDSET ─────────────────────────────────────
-    if vol >= 0.025:
-        mind_score   = 3
-        mind_summary = f"High volatility ({vol_pct:.2f}%/day) amplifies emotional mistakes. Rules: reduce size, honor stop at ${stop_loss:.2f}, don't average down. ATR of ${atr_val:.2f} means normal daily swings will feel painful — plan for them."
-    else:
-        mind_score   = 4
-        mind_summary = f"Stable trend reduces emotional pressure. Main risk is overconfidence — avoid chasing above ${r20:.2f} resistance. Always define your exit BEFORE entering."
-
-    scores  = {"Fundamentals": fund_score, "Technicals": tech_score,
-               "Risk Management": risk_score, "Trading Plan": plan_score,
-               "Entry/Exit": ee_score, "Mindset": mind_score}
-    overall = round(sum(scores.values()) / len(scores), 2)
+    # Key metrics for display
+    rev_growth  = info.get("revenueGrowth",0) or 0
+    eps_growth  = info.get("earningsGrowth",0) or 0
+    inst_pct    = info.get("heldPercentInstitutions",0) or 0
+    float_shares= info.get("floatShares",0) or 0
+    vol_ratio   = vol/vol_avg if vol_avg>0 else 1.0
 
     return {
-        "price": price, "rsi": rsi_val, "trend_bias": trend_bias,
-        "atr": atr_val, "atr_pct": atr_val / price * 100,
-        "vol": vol_pct, "support_watch": s20, "resistance_watch": r20,
-        "entry_low": entry_low, "entry_high": entry_high,
-        "stop_loss": stop_loss, "target_1": target_1, "target_2": target_2,
-        "rr": rr_1, "pos_size": pos_size,
-        "fund_summary": fund_summary, "fund_why_weak": fund_why_weak,
-        "tech_summary": tech_summary, "tech_why_weak": tech_why_weak,
-        "risk_full": risk_full, "risk_why_weak": risk_why_weak,
-        "plan_summary": plan_summary,
-        "ee_summary": ee_summary, "ee_why_weak": ee_why_weak,
-        "mind_summary": mind_summary,
-        "scores": scores, "overall_score": overall,
-        "levels": (s20, s50, s200, r20, r50, r200),
-        "market_cap": market_cap, "sector": sector,
-        "position_status": position_status, "suggested_action": suggested_action,
-        "ema9": ema9, "ema20": ema20, "ema50": ema50, "ema200": ema200,
-        "vwap": vwap_v, "bb_pos": bb_pos,
+        "price":price,"rsi":rsi_v,"trend_bias":trend_bias,
+        "atr":atr_v,"atr_pct":atr_v/price*100,
+        "vol_daily":vol_daily,"support_watch":s1,"resistance_watch":r1,
+        "entry_low":entry_low,"entry_high":entry_high,
+        "stop_loss":stop_loss,"target_1":target_1,"target_2":target_2,"rr":rr_1,
+        "scores":scores,"overall_score":overall,
+        "levels":(s1,s2,s3,r1,r2,r3),
+        "market_cap":info.get("marketCap"),"sector":info.get("sector",""),
+        "ema9":ema9,"ema20":ema20,"ema50":ema50,"ema200":ema200,
+        "vwap":vwap_v,"bb_pos":bb_pos,"bb_u":bb_u,"bb_l":bb_l,"bb_m":bb_m,
+        "st_dir":st_dir,"st_val":st_val,"max_dd":max_dd,
+        "rev_growth":rev_growth,"eps_growth":eps_growth,
+        "inst_pct":inst_pct,"float_shares":float_shares,"vol_ratio":vol_ratio,
+        "pe":info.get("trailingPE"),"fwd_pe":info.get("forwardPE"),
+        "analyst_target":info.get("targetMeanPrice"),
+        "fund_score":fund_score,"tech_score":tech_score,"risk_score":risk_score,
     }
 
-# ─────────────────────────────────────────
-# CHART — TradingView-style
-# ─────────────────────────────────────────
-def build_chart(df, ticker, show_bb=True, show_vwap=True, show_st=True, show_ema=True, show_macd=False, range_days=None):
+# ══════════════════════════════════════════════════════════════
+#  EXPERT AI COMMENTARY (OpenRouter)
+# ══════════════════════════════════════════════════════════════
+def get_openrouter_key():
+    try: return st.secrets.get("OPENROUTER_API_KEY")
+    except Exception: return None
+
+def generate_ai_commentary(payload, provider="none", model="openrouter/auto"):
+    if provider=="none":
+        return _expert_python_summary(payload), None
+    api_key = get_openrouter_key()
+    if not api_key:
+        return _expert_python_summary(payload), "⚠️ OPENROUTER_API_KEY not set. Showing Python analysis."
+
+    ticker   = payload.get("ticker","?")
+    price    = payload.get("price",0)
+    trend    = payload.get("trend_bias","Neutral")
+    rsi      = payload.get("rsi",50)
+    align    = payload.get("alignment_score",50)
+    iv       = payload.get("iv","N/A")
+    sent_sc  = payload.get("sentiment_score",50)
+    sent_lb  = payload.get("sentiment_label","Neutral")
+    event    = payload.get("event_risk","Low")
+    vehicle  = payload.get("options_vehicle","Wait")
+    s1       = payload.get("support",price*0.95)
+    r1       = payload.get("resistance",price*1.05)
+    fund_sc  = payload.get("fund_score",3)
+    tech_sc  = payload.get("tech_score",3)
+    overall  = payload.get("overall_score",3)
+    atr_pct  = payload.get("atr_pct",2)
+    rev_g    = payload.get("rev_growth",0)
+    eps_g    = payload.get("eps_growth",0)
+    inst_pct = payload.get("inst_pct",0)
+    max_dd   = payload.get("max_dd",-20)
+    mtf      = payload.get("primary_bias","Neutral")
+
+    prompt = f"""You are a senior portfolio manager and technical analyst with 20+ years experience.
+Provide a comprehensive, actionable trading analysis for {ticker}.
+
+== CURRENT DATA ==
+Price: ${price:.2f} | Trend: {trend} | RSI: {rsi:.1f} | MTF Bias: {mtf}
+MTF Alignment: {align}/100 | Overall Score: {overall}/5
+Fundamental Score: {fund_sc}/5 | Technical Score: {tech_sc}/5
+Revenue Growth: {rev_g*100:.1f}% | EPS Growth: {eps_g*100:.1f}%
+Institutional Ownership: {inst_pct*100:.1f}%
+Event Risk: {event} | IV: {iv if isinstance(iv,str) else f"{iv:.1f}%"}
+News Sentiment: {sent_lb} ({sent_sc}/100)
+ATR%: {atr_pct:.2f}% | Max Drawdown: {max_dd:.1f}%
+Key Support: ${s1:.2f} | Key Resistance: ${r1:.2f}
+Entry Zone: ${payload.get('entry_low',0):.2f}–${payload.get('entry_high',0):.2f}
+Stop Loss: ${payload.get('stop_loss',0):.2f} | T1: ${payload.get('target_1',0):.2f} | T2: ${payload.get('target_2',0):.2f}
+R:R: {payload.get('rr',0):.2f}x | Options Vehicle: {vehicle}
+
+Respond with EXACTLY these 8 sections. Be specific and data-driven. Minimum 3 sentences per section.
+
+### 📊 Executive Summary
+[Overall assessment: bullish/bearish/neutral, why, key conviction level, actionability score]
+
+### 🔬 Technical Analysis
+[Price structure, EMA stack, trend confirmation, MACD reading, volume analysis, key pattern if any]
+
+### 💼 Fundamental Assessment  
+[Revenue/EPS growth quality, margin trends, institutional conviction, valuation vs peers, balance sheet]
+
+### 🌐 Social & Market Sentiment
+[News sentiment analysis, institutional buying/selling signals, sector momentum, macro tailwinds/headwinds, Reddit/retail sentiment inference from volatility]
+
+### ⚡ Risk Assessment
+[ATR-based risk, earnings proximity, max drawdown context, position sizing guidance, correlation risk]
+
+### 🎯 Specific Trade Recommendation
+[Exact entry trigger (price level or condition), stop loss rationale, T1 and T2 exits, position size % of portfolio, time horizon]
+
+### 🚨 Key Catalysts & Invalidation
+[2-3 specific upcoming catalysts, exact price that invalidates the thesis, what you'd need to see to change view]
+
+### 🧠 Trader Psychology Note
+[Common emotional traps for this specific setup, discipline rule to follow, one contrarian consideration]"""
+
+    try:
+        headers = {"Authorization":f"Bearer {api_key}","Content-Type":"application/json",
+                   "HTTP-Referer":"https://utpal-trading-dashboard.streamlit.app","X-Title":"Utpal Trading"}
+        body    = {"model":model,"messages":[{"role":"user","content":prompt}],"max_tokens":1200}
+        resp    = requests.post("https://openrouter.ai/api/v1/chat/completions",
+                                headers=headers,json=body,timeout=30)
+        if resp.status_code==200:
+            return resp.json()["choices"][0]["message"]["content"], None
+        return _expert_python_summary(payload), f"⚠️ OpenRouter {resp.status_code}. Python analysis shown."
+    except Exception as e:
+        return _expert_python_summary(payload), f"⚠️ API error: {str(e)[:80]}"
+
+def _expert_python_summary(p):
+    ticker   = p.get("ticker","?")
+    trend    = p.get("trend_bias","Neutral")
+    rsi      = p.get("rsi",50)
+    align    = p.get("alignment_score",50)
+    score    = p.get("overall_score",3)
+    s1       = p.get("support",0)
+    r1       = p.get("resistance",0)
+    stop     = p.get("stop_loss",0)
+    t1       = p.get("target_1",0)
+    t2       = p.get("target_2",0)
+    rr       = p.get("rr",0)
+    event    = p.get("event_risk","Low")
+    vehicle  = p.get("options_vehicle","Wait")
+    sent_sc  = p.get("sentiment_score",50)
+    sent_lb  = p.get("sentiment_label","Neutral")
+    atr_pct  = p.get("atr_pct",2)
+    rev_g    = p.get("rev_growth",0)*100
+    eps_g    = p.get("eps_growth",0)*100
+    fund_sc  = p.get("fund_score",3)
+    tech_sc  = p.get("tech_score",3)
+    inst_pct = p.get("inst_pct",0)*100
+    mtf      = p.get("primary_bias","Neutral")
+    price    = p.get("price",0)
+    max_dd   = p.get("max_dd",-20)
+
+    conviction = "HIGH" if score>=4 else ("MODERATE" if score>=3 else "LOW")
+    trend_color = "bullish" if trend=="Bullish" else ("bearish" if trend=="Bearish" else "neutral")
+
+    sections = []
+    sections.append(f"""### 📊 Executive Summary
+**{ticker}** presents a **{conviction} conviction {trend_color}** setup with an overall score of **{score}/5**.
+Multi-timeframe alignment stands at **{align}/100** ({mtf}), suggesting {'strong directional conviction across timeframes' if align>=65 else ('mixed signals requiring patience' if align>=45 else 'significant trend conflict — caution advised')}.
+{'News sentiment is ' + sent_lb.lower() + f' at {sent_sc}/100, providing ' + ('tailwind' if sent_sc>60 else ('headwind' if sent_sc<40 else 'neutral backdrop')) + ' for the trade thesis.' if True else ''}
+Actionability: {'✅ Ready to trade with defined risk' if score>=3.5 and align>=55 and event!='High' else '⚠️ Wait for better setup or lower risk environment'}.""")
+
+    ema9=p.get("ema9",price*0.99); ema20=p.get("ema20",price*0.98); ema50=p.get("ema50",price*0.95); ema200=p.get("ema200",price*0.90)
+    sections.append(f"""### 🔬 Technical Analysis
+Price at **${price:.2f}** is {'above' if price>ema20 else 'below'} EMA20 (${ema20:.2f}) and {'above' if price>ema50 else 'below'} EMA50 (${ema50:.2f}), {'suggesting continuation of the uptrend' if price>ema20>ema50 else 'indicating weakness in the trend structure'}.
+RSI at **{rsi:.1f}** is {'in the healthy 45–65 bullish zone — room to run without being extended' if 45<rsi<65 else ('overbought — short-term pullback risk elevated' if rsi>70 else ('oversold — potential mean reversion bounce' if rsi<30 else 'neutral — watching for directional confirmation'))}.
+Technical score **{tech_sc}/5**: VWAP {'above' if price>p.get('vwap',price) else 'below'} price (buyers {'in' if price>p.get('vwap',price) else 'losing'} control). 
+Key support at **${s1:.2f}**, resistance at **${r1:.2f}** — defined range of **{((r1-s1)/s1*100):.1f}%**.""")
+
+    sections.append(f"""### 💼 Fundamental Assessment
+Fundamental score **{fund_sc}/5**. Revenue growth at **{rev_g:.1f}%** YoY {'— above 15% threshold indicating strong demand expansion' if rev_g>15 else ('— moderate growth suggesting stable but not accelerating business' if rev_g>5 else '— growth concerns require watching next earnings for improvement')}.
+EPS trajectory at **{eps_g:.1f}%** {'outpacing revenue growth — expanding margins, quality earnings' if eps_g>rev_g else 'tracking revenue — inline margin performance'}.
+Institutional ownership at **{inst_pct:.1f}%** {'suggests strong smart money conviction — reduces supply overhang' if inst_pct>65 else ('moderate institutional interest' if inst_pct>40 else '— lower institutional involvement, higher retail-driven volatility risk')}.
+Valuation context: {'P/E of ' + str(round(p.get("pe",0) or 0,1)) + 'x — ' + ('premium priced for growth, needs execution' if (p.get("pe") or 0)>35 else 'reasonable relative to growth rate') if p.get("pe") else 'P/E data unavailable — use EV/Sales or price/FCF for context'}.""")
+
+    sections.append(f"""### 🌐 Social & Market Sentiment
+News sentiment score **{sent_sc}/100** ({sent_lb}) based on aggregated headlines from Google News and Yahoo Finance across earnings, analyst actions, and sector news.
+{'Bullish catalysts detected: analyst upgrades, positive guidance references, or beat expectations language in recent coverage.' if sent_sc>60 else ('Bearish language detected: downgrade risks, miss concerns, or macro headwinds referenced in news flow.' if sent_sc<40 else 'Sentiment is balanced — no strong directional bias from news flow currently.')}
+Implied volatility context: {'IV elevated — suggests options market pricing in significant move, consistent with news-driven uncertainty' if isinstance(p.get("iv"),float) and p.get("iv",0)>40 else ('IV muted — market not pricing large move, options cheap for directional bets' if isinstance(p.get("iv"),float) else 'IV data unavailable')}.
+Sector momentum: {'tech/semiconductor names showing correlation to AI capex cycle — macro tailwind intact' if 'Tech' in (p.get("sector","") or '') or ticker in ['AVGO','NVDA','AMD','INTC','MU'] else 'monitor sector rotation for any headwinds'}.""")
+
+    sections.append(f"""### ⚡ Risk Assessment
+ATR-based daily expected move: **{atr_pct:.2f}%** of price. {'High volatility — size down by 30–50% vs normal position' if atr_pct>3 else ('Moderate volatility — standard ATR-based stops appropriate' if atr_pct>1.5 else 'Low volatility — wider stops less likely to trigger on noise')}.
+Event risk: **{event}** {'— earnings binary risk, IV inflated, recommend avoiding new positions or using spreads to cap debit' if event=='High' else ('— earnings approaching, reduce size and use defined risk structures' if event=='Moderate' else '— clean window with no known binary events, favorable environment')}.
+Historical max drawdown: **{max_dd:.1f}%** — size positions so max loss on this trade ≤ 1–2% of total portfolio.
+Stop at **${stop:.2f}** — {'this is {:.1f}% below current price, consistent with ATR-based noise floor'.format((price-stop)/price*100) if price>0 else 'defined below key support'}. Honoring the stop is non-negotiable.""")
+
+    sections.append(f"""### 🎯 Specific Trade Recommendation
+**Direction:** {'Long (Buy)' if trend=='Bullish' else ('Short (Sell)' if trend=='Bearish' else 'Wait for confirmation')}
+**Entry trigger:** {'Pullback to EMA20 (${:.2f}) on declining volume, then green candle confirmation'.format(ema20) if trend=='Bullish' else ('Bounce to EMA20 (${:.2f}) on low volume, then red candle rejection'.format(ema20) if trend=='Bearish' else 'Wait for price to reclaim EMA50 with volume before entry')}
+**Position sizing:** Risk max 1% of account — with stop at ${stop:.2f}, that sets your size automatically via position sizer below.
+**Vehicle:** {vehicle} | **Entry zone:** ${p.get('entry_low',0):.2f}–${p.get('entry_high',0):.2f} | **Stop:** ${stop:.2f} | **T1:** ${t1:.2f} (+{((t1-price)/price*100):.1f}%) | **T2:** ${t2:.2f} (+{((t2-price)/price*100):.1f}%)
+**R:R:** **{rr:.2f}x** {'✅ Acceptable' if rr>=2 else '⚠️ Below 2x minimum — improve entry or skip'}. Time horizon: 2–6 weeks for swing trade.""")
+
+    sections.append(f"""### 🚨 Key Catalysts & Invalidation
+**Upcoming catalysts to watch:** {'Earnings in ' + str(p.get("days_to_earnings","?")) + ' days — primary binary event' if p.get("days_to_earnings") else 'Next earnings release'}, Federal Reserve rate decisions, sector earnings from peers (watch for read-across), macro data (CPI/NFP).
+**Invalidation:** Trade is invalidated on **close below ${stop:.2f}**. If this level breaks on high volume, the support structure is damaged — exit without hesitation, no averaging down.
+**Bull case:** {trend=='Bullish' and f'Price reclaims and holds ${r1:.2f} resistance on volume → confirms breakout, add to position' or f'Price reclaims EMA50 (${ema50:.2f}) → first sign of recovery'}. 
+**Bear case:** {'Close below EMA200 (${:.2f}) invalidates entire bullish thesis'.format(ema200)} — signals structural breakdown, not just a pullback.""")
+
+    sections.append(f"""### 🧠 Trader Psychology Note
+**Primary emotional trap here:** {'Chasing — if you missed the initial move, do NOT chase above resistance. Wait for the next pullback to EMA20.' if trend=='Bullish' and rsi>65 else ('Catching a falling knife — every bounce looks like a reversal in a downtrend. Need structure change, not just a green day.' if trend=='Bearish' else 'Analysis paralysis — waiting for perfect setup means missing good setups. Define your criteria and execute.')}
+**Discipline rule:** Write your entry, stop, and target BEFORE placing the order. If price doesn't reach your entry zone, you don't trade — that IS a trade decision.
+**Contrarian consideration:** {'At RSI ' + f'{rsi:.0f}' + ', the crowd is ' + ('euphoric — consider taking partial profits at T1 rather than holding for T2' if rsi>70 else ('fearful — which historically is where swing trades are built' if rsi<40 else 'neutral — no extreme to fade')) + '. Where is the majority wrong here?'}.""")
+
+    return "\n\n".join(sections)
+
+# ══════════════════════════════════════════════════════════════
+#  AI PORTFOLIO STRATEGY GENERATOR
+# ══════════════════════════════════════════════════════════════
+def generate_portfolio_strategy(positions_data, watchlist_signals, market_regime, provider="none", model="openrouter/auto"):
+    portfolio_summary = "\n".join([
+        f"- {t}: {d['shares']} shares @ ${d['avg_cost']:.4f} CAD, current ${d.get('current',d['avg_cost']):.2f}, P&L {d.get('pnl_pct',0):+.1f}%"
+        for t,d in positions_data.items()
+    ])
+    watchlist_summary = "\n".join([
+        f"- {s['ticker']}: {s['trend']} | RSI {s['rsi']:.0f} | ST {s['st_dir']} | Align {s['align']}/100 | Signal: {s['signal']}"
+        for s in watchlist_signals[:8]
+    ])
+    if provider=="none" or not get_openrouter_key():
+        # Python-generated strategy
+        strong = [s for s in watchlist_signals if s.get("align",0)>=65 and s.get("st_dir")=="up"]
+        risky  = [s for s in watchlist_signals if s.get("align",0)<=35]
+        lines  = [f"**Market Regime:** {market_regime.get('regime','Unknown')} | SPY: {market_regime.get('SPY','?')} | VIX: {market_regime.get('VIX','?')}"]
+        if strong:
+            lines.append(f"\n**🟢 Top Watchlist Opportunities ({len(strong)} setups):**")
+            for s in strong[:3]:
+                lines.append(f"- **{s['ticker']}**: MTF {s['align']}/100, Supertrend UP, RSI {s['rsi']:.0f} — consider adding on pullback to EMA20")
+        if risky:
+            lines.append(f"\n**🔴 Avoid for Now ({len(risky)} weak setups):** {', '.join(r['ticker'] for r in risky[:4])}")
+        lines.append(f"\n**Portfolio Note:** With ~${CASH_USD:,.0f} USD cash, deploy in 3 tranches: 33% on confirmed signal, 33% on continuation, 34% reserve.")
+        return "\n".join(lines)
+
+    prompt = f"""You are a professional portfolio manager. Analyze this swing trading portfolio and provide specific strategic recommendations.
+
+CURRENT POSITIONS:
+{portfolio_summary}
+Cash reserve: ~${CASH_USD:,.0f} USD (~${CASH_USD*CAD_RATE:,.0f} CAD)
+Portfolio goal: ${GOAL_LOW:,}–${GOAL_HIGH:,} CAD
+
+MARKET REGIME: {market_regime.get('regime','Unknown')} | SPY: {market_regime.get('SPY','?')} | QQQ: {market_regime.get('QQQ','?')} | VIX: {market_regime.get('VIX','N/A')}
+
+TOP WATCHLIST SIGNALS:
+{watchlist_summary}
+
+Provide a structured strategy covering:
+1. **Portfolio Assessment** — current position health, P&L status, concentration risk
+2. **Top 3 Watchlist Opportunities** — specific entry triggers, position sizes as % of cash
+3. **Rotation Strategy** — when/how to rotate between AVGO and META or into new positions  
+4. **Cash Deployment Plan** — how to deploy the ${CASH_USD:,.0f} USD across 3–4 tranches
+5. **Key Risks to Monitor** — 3 specific risk scenarios with mitigation actions
+6. **Target & Timeline** — path to ${GOAL_LOW:,}–${GOAL_HIGH:,} CAD goal
+
+Be specific, actionable, and reference actual prices/percentages."""
+
+    try:
+        api_key = get_openrouter_key()
+        headers = {"Authorization":f"Bearer {api_key}","Content-Type":"application/json",
+                   "HTTP-Referer":"https://utpal-trading-dashboard.streamlit.app"}
+        body    = {"model":model,"messages":[{"role":"user","content":prompt}],"max_tokens":1000}
+        resp    = requests.post("https://openrouter.ai/api/v1/chat/completions",headers=headers,json=body,timeout=30)
+        if resp.status_code==200:
+            return resp.json()["choices"][0]["message"]["content"]
+    except Exception:
+        pass
+    return generate_portfolio_strategy(positions_data, watchlist_signals, market_regime, "none")
+
+# ══════════════════════════════════════════════════════════════
+#  CHART — fixed rangebreaks, improved layout
+# ══════════════════════════════════════════════════════════════
+def build_chart(df, ticker, interval, show_bb=True, show_vwap=True, show_st=True,
+                show_ema=True, show_macd=False, range_days=None):
     if range_days:
         df = df.tail(range_days)
 
     vol_colors = np.where(df["Close"] >= df["Open"], "#26a69a", "#ef5350")
     rows    = 3 if show_macd else 2
-    heights = [0.60, 0.15, 0.25] if show_macd else [0.72, 0.28]
+    heights = [0.60,0.15,0.25] if show_macd else [0.74,0.26]
 
-    fig = make_subplots(rows=rows, cols=1, shared_xaxes=True,
-                        vertical_spacing=0.01, row_heights=heights, subplot_titles=None)
+    fig = make_subplots(rows=rows,cols=1,shared_xaxes=True,
+                        vertical_spacing=0.01,row_heights=heights)
 
     fig.add_trace(go.Candlestick(
-        x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
+        x=df.index,open=df["Open"],high=df["High"],low=df["Low"],close=df["Close"],
         name="Price",
-        increasing=dict(line=dict(color="#26a69a", width=1), fillcolor="#26a69a"),
-        decreasing=dict(line=dict(color="#ef5350", width=1), fillcolor="#ef5350"),
+        increasing=dict(line=dict(color="#26a69a",width=1),fillcolor="#26a69a"),
+        decreasing=dict(line=dict(color="#ef5350",width=1),fillcolor="#ef5350"),
         whiskerwidth=0,
-    ), row=1, col=1)
+    ),row=1,col=1)
 
     if show_bb:
-        fig.add_trace(go.Scatter(x=df.index, y=df["BB_Upper"], name="BB Upper",
-            line=dict(color="#5c6bc0", width=0.8, dash="dot"), showlegend=False), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df["BB_Lower"], name="BB Lower",
-            line=dict(color="#5c6bc0", width=0.8, dash="dot"),
-            fill="tonexty", fillcolor="rgba(92,107,192,0.05)", showlegend=False), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index,y=df["BB_Upper"],name="BB Upper",
+            line=dict(color="#5c6bc0",width=0.8,dash="dot"),showlegend=False),row=1,col=1)
+        fig.add_trace(go.Scatter(x=df.index,y=df["BB_Lower"],name="BB Lower",
+            line=dict(color="#5c6bc0",width=0.8,dash="dot"),
+            fill="tonexty",fillcolor="rgba(92,107,192,0.05)",showlegend=False),row=1,col=1)
+        fig.add_trace(go.Scatter(x=df.index,y=df["BB_Mid"],name="BB Mid",
+            line=dict(color="#5c6bc0",width=0.7,dash="dash"),showlegend=False),row=1,col=1)
 
     if show_ema:
-        for col_name, color, lw, label in [
-            ("EMA9",   "#ffffff", 1.0, "EMA 9"),
-            ("EMA20",  "#f5c542", 1.0, "EMA 20"),
-            ("EMA50",  "#4da3ff", 1.2, "EMA 50"),
-            ("EMA200", "#b388ff", 1.2, "EMA 200"),
+        for col_n,color,lw,label in [
+            ("EMA9","#ffffff",1.0,"EMA 9"),("EMA20","#f5c542",1.0,"EMA 20"),
+            ("EMA50","#4da3ff",1.2,"EMA 50"),("EMA200","#b388ff",1.4,"EMA 200"),
         ]:
-            fig.add_trace(go.Scatter(x=df.index, y=df[col_name], mode="lines",
-                name=label, line=dict(color=color, width=lw)), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index,y=df[col_n],mode="lines",
+                name=label,line=dict(color=color,width=lw)),row=1,col=1)
 
     if show_vwap:
-        fig.add_trace(go.Scatter(x=df.index, y=df["VWAP"], mode="lines",
-            name="VWAP", line=dict(color="#ff9800", width=1.2, dash="dash")), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index,y=df["VWAP"],mode="lines",name="VWAP",
+            line=dict(color="#ff9800",width=1.5,dash="dash")),row=1,col=1)
 
     if show_st:
-        st_up   = df["Supertrend"].where(df["SupertrendDir"] == "up")
-        st_down = df["Supertrend"].where(df["SupertrendDir"] == "down")
-        fig.add_trace(go.Scatter(x=df.index, y=st_up, mode="lines",
-            name="ST Bull", line=dict(color="#26a69a", width=1.5)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=st_down, mode="lines",
-            name="ST Bear", line=dict(color="#ef5350", width=1.5)), row=1, col=1)
+        st_up   = df["Supertrend"].where(df["SupertrendDir"]=="up")
+        st_down = df["Supertrend"].where(df["SupertrendDir"]=="down")
+        fig.add_trace(go.Scatter(x=df.index,y=st_up,mode="lines",name="ST Bull",
+            line=dict(color="#26a69a",width=2)),row=1,col=1)
+        fig.add_trace(go.Scatter(x=df.index,y=st_down,mode="lines",name="ST Bear",
+            line=dict(color="#ef5350",width=2)),row=1,col=1)
 
-    s20, s50, s200, r20, r50, r200 = get_levels(df)
-    for level, color, label in [(s20,"#26a69a","S20"),(r20,"#ef5350","R20")]:
-        fig.add_hline(y=level, line_dash="dot", line_color=color, line_width=0.8,
-                      annotation_text=f" {label}: {level:.2f}",
-                      annotation_font_color=color, annotation_font_size=10, row=1, col=1)
+    s1,s2,s3,r1,r2,r3 = get_key_levels(df)
+    price_now = float(df["Close"].iloc[-1])
+    for level,color,label in [(s1,"#26a69a","S1"),(r1,"#ef5350","R1"),(s2,"#1a7a72","S2"),(r2,"#a33534","R2")]:
+        fig.add_hline(y=level,line_dash="dot",line_color=color,line_width=0.9,
+                      annotation_text=f" {label}: ${level:.2f}",
+                      annotation_font_color=color,annotation_font_size=10,row=1,col=1)
 
-    fig.add_trace(go.Bar(x=df.index, y=df["Volume"], name="Volume",
-        marker_color=vol_colors, showlegend=False), row=2, col=1)
+    fig.add_trace(go.Bar(x=df.index,y=df["Volume"],name="Volume",
+        marker_color=vol_colors,showlegend=False),row=2,col=1)
+    # Volume EMA line
+    fig.add_trace(go.Scatter(x=df.index,y=df["Vol_EMA20"],mode="lines",name="Vol EMA20",
+        line=dict(color="#f5c542",width=1.0,dash="dot"),showlegend=False),row=2,col=1)
 
     if show_macd:
-        macd_colors = np.where(df["MACD_Hist"] >= 0, "#26a69a", "#ef5350")
-        fig.add_trace(go.Bar(x=df.index, y=df["MACD_Hist"], name="MACD Hist",
-            marker_color=macd_colors, showlegend=False), row=3, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df["MACD"], mode="lines",
-            name="MACD", line=dict(color="#2962ff", width=1.2)), row=3, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df["MACD_Signal"], mode="lines",
-            name="Signal", line=dict(color="#ff6b35", width=1.0)), row=3, col=1)
+        macd_colors = np.where(df["MACD_Hist"]>=0,"#26a69a","#ef5350")
+        fig.add_trace(go.Bar(x=df.index,y=df["MACD_Hist"],name="MACD Hist",
+            marker_color=macd_colors,showlegend=False),row=3,col=1)
+        fig.add_trace(go.Scatter(x=df.index,y=df["MACD"],mode="lines",name="MACD",
+            line=dict(color="#2962ff",width=1.2)),row=3,col=1)
+        fig.add_trace(go.Scatter(x=df.index,y=df["MACD_Signal"],mode="lines",name="Signal",
+            line=dict(color="#ff6b35",width=1.0)),row=3,col=1)
+        fig.add_hline(y=0,line_color="#363a45",line_width=0.5,row=3,col=1)
 
     fig.update_layout(
-        title=dict(text=f"  {ticker}", font=dict(size=16, color="#d1d4dc"), x=0),
+        title=dict(text=f"  {ticker}",font=dict(size=16,color="#d1d4dc"),x=0),
         template="plotly_dark",
-        height=720 if show_macd else 600,
-        dragmode="pan",
-        hovermode="x unified",
+        height=700 if show_macd else 580,
+        dragmode="pan",hovermode="x unified",
         xaxis_rangeslider_visible=False,
-        margin=dict(l=50, r=10, t=36, b=10),
-        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="left", x=0, font=dict(size=11)),
-        plot_bgcolor="#131722",
-        paper_bgcolor="#131722",
-        font=dict(color="#d1d4dc", size=11),
-        modebar=dict(bgcolor="#1e222d", color="#787b86", activecolor="#2962ff"),
-        newshape=dict(line_color="#2962ff"),
+        margin=dict(l=50,r=10,t=36,b=10),
+        legend=dict(orientation="h",yanchor="bottom",y=1.01,xanchor="left",x=0,font=dict(size=11)),
+        plot_bgcolor="#131722",paper_bgcolor="#131722",
+        font=dict(color="#d1d4dc",size=11),
     )
+
+    # ── RANGEBREAKS: remove weekends & non-market hours ──
+    rangebreaks = [dict(bounds=["sat","mon"])]  # always remove weekends
+    if interval in ("1m","5m","15m","1h"):
+        rangebreaks.append(dict(bounds=[16,9.5],pattern="hour"))  # US market hours
+    elif interval == "4h":
+        rangebreaks.append(dict(bounds=[20,4],pattern="hour"))
+
     fig.update_xaxes(
-        showgrid=True, gridcolor="#1f2937", gridwidth=0.5,
-        zeroline=False, showspikes=True, spikemode="across",
-        spikesnap="cursor", spikecolor="#787b86", spikethickness=1,
-        showline=True, linecolor="#363a45",
+        showgrid=True,gridcolor="#1f2937",gridwidth=0.5,
+        zeroline=False,showspikes=True,spikemode="across",
+        spikecolor="#787b86",spikethickness=1,
+        showline=True,linecolor="#363a45",
+        rangebreaks=rangebreaks,
         rangeselector=dict(
             buttons=[
-                dict(count=5,  label="5D",  step="day",   stepmode="backward"),
-                dict(count=1,  label="1M",  step="month", stepmode="backward"),
-                dict(count=3,  label="3M",  step="month", stepmode="backward"),
-                dict(count=6,  label="6M",  step="month", stepmode="backward"),
-                dict(count=1,  label="1Y",  step="year",  stepmode="backward"),
-                dict(step="all", label="All"),
+                dict(count=5,label="5D",step="day",stepmode="backward"),
+                dict(count=1,label="1M",step="month",stepmode="backward"),
+                dict(count=3,label="3M",step="month",stepmode="backward"),
+                dict(count=6,label="6M",step="month",stepmode="backward"),
+                dict(count=1,label="1Y",step="year",stepmode="backward"),
+                dict(step="all",label="All"),
             ],
-            bgcolor="#1e222d", activecolor="#2962ff",
-            font=dict(color="#d1d4dc", size=11),
-            bordercolor="#363a45", borderwidth=1,
-        ) if len(df) > 20 else None,
+            bgcolor="#1e222d",activecolor="#2962ff",
+            font=dict(color="#d1d4dc",size=11),
+            bordercolor="#363a45",borderwidth=1,
+        ) if len(df)>20 else None,
     )
-    fig.update_yaxes(showgrid=True, gridcolor="#1f2937", gridwidth=0.5,
-                     zeroline=False, showline=True, linecolor="#363a45",
-                     tickformat=".2f", side="right")
-    fig.update_yaxes(title_text="", row=2, col=1, tickformat=".2s")
+    fig.update_yaxes(showgrid=True,gridcolor="#1f2937",gridwidth=0.5,
+                     zeroline=False,showline=True,linecolor="#363a45",
+                     tickformat=".2f",side="right")
+    fig.update_yaxes(title_text="",row=2,col=1,tickformat=".2s")
     if show_macd:
-        fig.update_yaxes(title_text="", row=3, col=1)
+        fig.update_yaxes(title_text="MACD",row=3,col=1)
     return fig
 
-# ═══════════════════════════════════════════════════════════════
-# SIDEBAR NAVIGATION
-# ═══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
+#  POSITION SIZING
+# ══════════════════════════════════════════════════════════════
+def calc_position_size(account, cash_avail, risk_pct, entry, stop, t1, t2, asset_type, atr_val=None):
+    if entry<=0 or stop<=0 or stop>=entry:
+        return None,"⚠️ Stop must be below entry and both > 0."
+    max_risk = account*(risk_pct/100)
+    risk_u   = entry - stop
+    units    = max_risk/risk_u if risk_u>0 else 0
+    label_u  = "shares"
+    if asset_type=="Option":
+        units = max(1, int(units/100)); label_u="contracts"; pos_val = units*100*entry
+    else:
+        units = int(units); pos_val = units*entry
+    rr1 = (t1-entry)/risk_u if risk_u>0 and t1>entry else 0
+    rr2 = (t2-entry)/risk_u if risk_u>0 and t2>entry else 0
+    warnings = []
+    if pos_val>cash_avail: warnings.append(f"⚠️ Position ${pos_val:,.0f} > available cash ${cash_avail:,.0f}. Scale down.")
+    if atr_val and risk_u/atr_val<0.5: warnings.append(f"⚠️ Stop {risk_u/atr_val:.1f}x ATR — very tight, high noise risk.")
+    if rr1>0 and rr1<1.5: warnings.append(f"⚠️ R:R to T1 = {rr1:.2f}x — below 1.5x minimum.")
+    return {"max_risk":max_risk,"units":units,"label_unit":label_u,"pos_value":pos_val,
+            "risk_per_unit":risk_u,"rr1":rr1,"rr2":rr2}, "\n".join(warnings) if warnings else None
+
+# ══════════════════════════════════════════════════════════════
+#  JOURNAL
+# ══════════════════════════════════════════════════════════════
+def load_journal():
+    if not os.path.exists(JOURNAL_FILE): return pd.DataFrame(columns=JOURNAL_COLS)
+    try:
+        df = pd.read_csv(JOURNAL_FILE)
+        for c in JOURNAL_COLS:
+            if c not in df.columns: df[c]=""
+        return df
+    except Exception:
+        return pd.DataFrame(columns=JOURNAL_COLS)
+
+def save_trade(d):
+    exists = os.path.exists(JOURNAL_FILE)
+    with open(JOURNAL_FILE,"a",newline="") as f:
+        w = csv.DictWriter(f,fieldnames=JOURNAL_COLS)
+        if not exists: w.writeheader()
+        w.writerow({c:d.get(c,"") for c in JOURNAL_COLS})
+
+def journal_analytics(df):
+    if df.empty or "result" not in df.columns: return {}
+    df = df.copy()
+    df["pnl"] = pd.to_numeric(df["pnl"],errors="coerce").fillna(0)
+    df["alignment_score"] = pd.to_numeric(df["alignment_score"],errors="coerce").fillna(0)
+    total = len(df)
+    wins  = df[df["result"].str.lower()=="win"]
+    losses= df[df["result"].str.lower()=="loss"]
+    wr    = len(wins)/total*100 if total>0 else 0
+    aw    = wins["pnl"].mean() if not wins.empty else 0
+    al    = losses["pnl"].mean() if not losses.empty else 0
+    gp    = wins["pnl"].sum()
+    gl    = abs(losses["pnl"].sum())
+    pf    = gp/gl if gl>0 else float("inf")
+    exp   = (wr/100*aw)+((1-wr/100)*al)
+    insights = []
+    ha = df[df["alignment_score"]>=70]; la = df[df["alignment_score"]<50]
+    if len(ha)>=2 and len(la)>=2:
+        wrh = len(ha[ha["result"].str.lower()=="win"])/len(ha)*100
+        wrl = len(la[la["result"].str.lower()=="win"])/len(la)*100
+        if wrh>wrl+10:
+            insights.append(f"✅ High-alignment trades win {wrh:.0f}% vs {wrl:.0f}% for low-alignment. Prioritize MTF alignment ≥70.")
+    return {"total":total,"win_rate":wr,"avg_win":aw,"avg_loss":al,"total_pnl":df["pnl"].sum(),
+            "profit_factor":pf,"expectancy":exp,"insights":insights}
+
+# ══════════════════════════════════════════════════════════════
+#  UTILITIES
+# ══════════════════════════════════════════════════════════════
+def fmt_large(n):
+    if n is None: return "N/A"
+    if n>=1e12: return f"${n/1e12:.2f}T"
+    if n>=1e9:  return f"${n/1e9:.2f}B"
+    if n>=1e6:  return f"${n/1e6:.2f}M"
+    return f"${n:,.0f}"
+
+def score_badge(s):
+    if s>=4.5: return "strong","🟢 Excellent"
+    if s>=3.5: return "strong","🟢 Strong"
+    if s>=2.5: return "avg",  "🟡 Average"
+    return "weak","🔴 Weak"
+
+def render_chips(chips):
+    html = ""
+    for label,color in chips:
+        css = f"chip-{color}"
+        html += f'<span class="chip {css}">{label}</span>'
+    return html
+
+def render_data_integrity(meta, interval):
+    if meta is None: return
+    now = datetime.now()
+    ft  = meta.get("fetch_time",now)
+    lc  = meta.get("last_candle")
+    bar_age = None
+    if lc is not None:
+        try:
+            lc2 = pd.Timestamp(lc)
+            if lc2.tzinfo: lc2 = lc2.tz_localize(None)
+            bar_age = int((now-lc2).total_seconds()/60)
+        except Exception: pass
+    feed = "🔄 Near-Realtime" if bar_age and bar_age<20 else ("⏱ Delayed" if bar_age and bar_age<60 else "📦 Historical")
+    mkt  = "🟢 Open" if (now.weekday()<5 and 9<=now.hour<16) else "🔴 Closed"
+    st.markdown('<div class="data-panel">', unsafe_allow_html=True)
+    d1,d2,d3,d4,d5,d6,d7 = st.columns(7)
+    d1.metric("Source","Yahoo Finance"); d2.metric("Interval",interval)
+    d3.metric("Fetched",ft.strftime("%H:%M:%S"))
+    d4.metric("Last Bar",str(lc)[:16] if lc else "N/A")
+    d5.metric("Bar Age",f"{bar_age}m" if bar_age else "N/A")
+    d6.metric("Market",mkt); d7.metric("Feed",feed)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════
+#  SIDEBAR
+# ══════════════════════════════════════════════════════════════
 with st.sidebar:
     st.markdown("### 📊 Trading Desk")
-    page = st.radio("Navigate", [
-        "📈 Chart & Analysis",
-        "💼 Portfolio",
-        "👁️ Watchlist",
-        "📓 Journal",
+    page = st.radio("nav", [
+        "📈 Chart & Analysis","💼 Portfolio","👁️ Watchlist","📓 Journal",
     ], label_visibility="collapsed")
     st.divider()
-
-    # ── AI Provider Settings ──────────────────────────────────
     st.markdown("**🤖 AI Settings**")
-    ai_provider = st.selectbox("AI Provider", ["none", "openrouter"], key="ai_provider")
-    ai_model    = st.text_input("Model", value="openrouter/auto", key="ai_model")
-    ai_enabled  = st.toggle("Enable AI Comments", value=True, key="ai_enabled")
-
-    api_key_present = get_openrouter_key() is not None
-    if ai_provider == "openrouter" and not api_key_present:
-        st.warning("⚠️ OPENROUTER_API_KEY not found in secrets. AI disabled.")
-    elif ai_provider == "openrouter" and api_key_present:
-        st.success("✅ API key loaded from secrets")
-
+    ai_provider = st.selectbox("AI Provider",["none","openrouter"],key="ai_provider")
+    ai_model    = st.text_input("Model",value="openrouter/auto",key="ai_model")
+    ai_enabled  = st.toggle("Enable AI Comments",value=True,key="ai_enabled")
+    key_ok      = get_openrouter_key() is not None
+    if ai_provider=="openrouter" and not key_ok:
+        st.warning("⚠️ OPENROUTER_API_KEY missing")
+    elif ai_provider=="openrouter" and key_ok:
+        st.success("✅ API key loaded")
     st.divider()
-    st.markdown("**Quick Access**")
-    quick_tickers = ["AVGO", "META", "NVDA", "AMD", "AMZN"]
-    for qt in quick_tickers:
-        if st.button(qt, key=f"quick_{qt}", use_container_width=True):
-            st.session_state["ticker_input"] = qt
-            st.session_state["page_override"] = "📈 Chart & Analysis"
+    st.markdown("**⚡ Quick Charts**")
+    for qt in ["AVGO","META","NVDA","AMD","AMZN"]:
+        if st.button(qt,key=f"q_{qt}",use_container_width=True):
+            st.session_state["ticker_input"]=qt
+            st.session_state["page_override"]="📈 Chart & Analysis"
     st.divider()
-    st.caption("Data: Yahoo Finance · Refresh every 5 min")
+    st.caption("Data: Yahoo Finance · 5min cache")
 
-# Handle page override from watchlist click
 if "page_override" in st.session_state:
     page = st.session_state.pop("page_override")
 
-# ═══════════════════════════════════════════════════════════════
-# PAGE 1: CHART & ANALYSIS
-# ═══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
+#  PAGE 1: CHART & ANALYSIS
+# ══════════════════════════════════════════════════════════════
 if "📈" in page:
-    # ── Row 1: Ticker + price ─────────────────────────────────
     st.markdown("## 📈 Chart & Analysis")
+    c1,c2,c3 = st.columns([3,1,1])
+    with c1:
+        default_tick = st.session_state.get("ticker_input","AVGO")
+        ticker = st.text_input("Ticker",value=default_tick,placeholder="e.g. AVGO, META, NVDA").strip().upper()
+    with c2:
+        interval = st.selectbox("Interval",["1m","5m","15m","1h","4h","1d","1wk"],index=5)
+    with c3:
+        st.markdown("<br>",unsafe_allow_html=True)
+        run = st.button("▶ Load",use_container_width=True)
 
-    row1_c1, row1_c2, row1_c3 = st.columns([3, 1, 1])
-    with row1_c1:
-        default_tick = st.session_state.get("ticker_input", "AVGO")
-        ticker = st.text_input("Ticker", value=default_tick, placeholder="e.g. AVGO, META, NVDA").strip().upper()
-    with row1_c2:
-        interval = st.selectbox("Interval", ["1m","5m","15m","1h","4h","1d","1wk"], index=5)
-    with row1_c3:
-        st.markdown("<br>", unsafe_allow_html=True)
-        run = st.button("▶ Load", use_container_width=True)
+    if not ticker: st.info("Enter a ticker symbol above."); st.stop()
 
-    if not ticker:
-        st.info("Enter a ticker symbol above.")
-        st.stop()
-
-    df, info, error, meta = get_stock_data(ticker, interval)
+    df,info,error,meta = get_stock_data(ticker, interval)
     if error or df is None:
-        st.error(f"Could not load data for **{ticker}**: {error}")
-        st.stop()
+        st.error(f"Could not load data for **{ticker}**: {error}"); st.stop()
 
-    news         = get_news(ticker)
-    sent_score, sent_label = calculate_sentiment(news)
-    a            = analyze(df, info or {}, ticker, sent_score)
-    catalyst     = get_catalyst_data(ticker)
-    opt_data     = get_options_data(ticker)
-    mtf          = get_mtf_data(ticker)
+    news              = get_news(ticker)
+    sent_score,sent_label = calculate_sentiment(news)
+    a                 = analyze(df, info or {}, ticker, sent_score)
+    catalyst          = get_catalyst_data(ticker)
+    opt_data          = get_options_data(ticker)
+    mtf               = get_mtf_data(ticker)
+    signals           = generate_signals(df, a, catalyst, mtf["alignment_score"], info or {})
+    regime            = get_market_regime()
 
-    latest_close = float(df["Close"].iloc[-1])
-    prev_close   = float(df["Close"].iloc[-2]) if len(df) > 1 else latest_close
-    chg          = latest_close - prev_close
-    chg_pct      = chg / prev_close * 100 if prev_close else 0
+    cur  = float(df["Close"].iloc[-1])
+    prev = float(df["Close"].iloc[-2]) if len(df)>1 else cur
+    chg  = cur - prev
+    chg_pct = chg/prev*100 if prev else 0
 
-    # ── DATA INTEGRITY PANEL ──────────────────────────────────
-    render_data_integrity_panel(meta, ticker, interval)
+    # ── Data integrity ──
+    render_data_integrity(meta, interval)
 
-    # ── Header Metrics Row ────────────────────────────────────
-    m1, m2, m3, m4, m5, m6 = st.columns(6)
-    m1.metric("Ticker",    ticker)
-    m2.metric("Price",     f"${latest_close:.2f}", f"{chg:+.2f} ({chg_pct:+.2f}%)")
-    m3.metric("RSI",       f"{a['rsi']:.1f}", "Overbought" if a['rsi'] > 70 else ("Oversold" if a['rsi'] < 30 else "Normal"))
-    m4.metric("Trend",     a["trend_bias"])
-    m5.metric("Score",     f"{a['overall_score']}/5")
-    m6.metric("Sentiment", f"{sent_score}/100 {sent_label}")
-
+    # ── Header metrics ──
+    m1,m2,m3,m4,m5,m6 = st.columns(6)
+    m1.metric("Ticker",ticker)
+    m2.metric("Price",f"${cur:.2f}",f"{chg:+.2f} ({chg_pct:+.2f}%)")
+    m3.metric("RSI",f"{a['rsi']:.1f}","OB" if a['rsi']>70 else ("OS" if a['rsi']<30 else "✓"))
+    m4.metric("Trend",a["trend_bias"])
+    m5.metric("Score",f"{a['overall_score']:.1f}/5")
+    m6.metric("Sentiment",f"{sent_score}/100 {sent_label}")
     st.divider()
 
-    # ── MARKET REGIME ─────────────────────────────────────────
-    render_market_regime()
-
+    # ── Market Regime ──
+    st.markdown("### 🌐 Market Regime")
+    r1c,r2c,r3c,r4c = st.columns(4)
+    r1c.metric("SPY",regime["SPY"]); r2c.metric("QQQ",regime["QQQ"])
+    r3c.metric("VIX",f"{regime['VIX']:.1f}" if regime["VIX"] else "N/A",
+               "⚠️ High" if regime["VIX"] and regime["VIX"]>25 else ("Normal" if regime["VIX"] else ""))
+    reg_color = {"Risk-on":"#26a69a","Cautious Bull":"#f5c842","Risk-off":"#ef5350",
+                 "Extreme Fear":"#ef5350","Choppy":"#f5c842"}.get(regime["regime"],"#787b86")
+    r4c.markdown(f"**Regime:**<br><span style='color:{reg_color};font-size:18px;font-weight:700'>{regime['regime']}</span>",unsafe_allow_html=True)
     st.divider()
 
-    # ── CATALYST PANEL ────────────────────────────────────────
-    st.markdown("### 🗓️ Catalyst Panel")
-    st.markdown(f'<div class="{catalyst["risk_css"]}"><strong>{catalyst["risk_label"]}</strong></div>', unsafe_allow_html=True)
-    st.markdown("")
-
-    ca1, ca2, ca3, ca4 = st.columns(4)
-    with ca1:
-        if catalyst["earnings_date"]:
-            st.metric("Next Earnings", str(catalyst["earnings_date"]),
-                      f"{catalyst['days_to_earnings']} days" if catalyst["days_to_earnings"] is not None else "")
-        else:
-            st.metric("Next Earnings", "N/A")
-    with ca2:
-        st.metric("Event Risk", catalyst["event_risk"])
-    with ca3:
-        if catalyst["ex_div_date"]:
-            st.metric("Ex-Div Date", str(catalyst["ex_div_date"]))
-        else:
-            st.metric("Ex-Div Date", "N/A")
-    with ca4:
-        if catalyst["analyst_target"]:
-            upside = (catalyst["analyst_target"] - latest_close) / latest_close * 100
-            st.metric("Analyst Target", f"${catalyst['analyst_target']:.2f}", f"{upside:+.1f}%")
-        else:
-            st.metric("Analyst Target", "N/A")
-
+    # ── Signal Chips ──
+    st.markdown("### ⚡ Signals & Warnings")
+    st.markdown(render_chips(signals), unsafe_allow_html=True)
     st.divider()
 
-    # ── Row 2: Timeframe indicator toggles ────────────────────
-    st.markdown("**Chart Indicators**")
-    cc1, cc2, cc3, cc4, cc5 = st.columns(5)
-    with cc1: show_ema  = st.checkbox("EMAs",       value=True)
-    with cc2: show_bb   = st.checkbox("Bollinger",  value=False)
-    with cc3: show_vwap = st.checkbox("VWAP",       value=True)
-    with cc4: show_st   = st.checkbox("Supertrend", value=True)
-    with cc5: show_macd = st.checkbox("MACD Panel", value=False)
-
-    st.caption("💡 Scroll to zoom · Drag to pan · Use 1M/3M/1Y buttons on chart · Double-click to reset")
-
-    fig = build_chart(df, ticker, show_bb, show_vwap, show_st, show_ema, show_macd)
-    st.plotly_chart(fig, use_container_width=True, config={
-        "scrollZoom": True, "displayModeBar": True,
-        "modeBarButtonsToAdd": ["drawline","drawopenpath","drawrect","eraseshape"],
-        "modeBarButtonsToRemove": ["autoScale2d"],
-        "toImageButtonOptions": {"format": "png", "filename": f"{ticker}_chart"},
+    # ── Chart Controls ──
+    st.markdown("**Chart Overlays**")
+    oc1,oc2,oc3,oc4,oc5 = st.columns(5)
+    with oc1: show_ema  = st.checkbox("EMAs",value=True)
+    with oc2: show_bb   = st.checkbox("Bollinger",value=False)
+    with oc3: show_vwap = st.checkbox("VWAP",value=True)
+    with oc4: show_st   = st.checkbox("Supertrend",value=True)
+    with oc5: show_macd = st.checkbox("MACD Panel",value=False)
+    st.caption("💡 Scroll=zoom · Drag=pan · Non-trading gaps removed · Click range buttons above chart")
+    fig = build_chart(df,ticker,interval,show_bb,show_vwap,show_st,show_ema,show_macd)
+    st.plotly_chart(fig,use_container_width=True,config={
+        "scrollZoom":True,"displayModeBar":True,
+        "modeBarButtonsToAdd":["drawline","drawopenpath","drawrect","eraseshape"],
+        "toImageButtonOptions":{"format":"png","filename":f"{ticker}_chart"},
     })
-
     st.divider()
 
-    # ── SUGGESTIONS & TRADE PLAN ──────────────────────────────
-    st.markdown("### 📌 Suggestions & Trade Plan")
-    s20, s50, s200, r20, r50, r200 = a["levels"]
+    # ── Catalyst ──
+    st.markdown("### 🗓️ Catalyst Panel")
+    st.markdown(f'<div class="{catalyst["risk_css"]}"><strong>{catalyst["risk_label"]}</strong></div>',unsafe_allow_html=True)
+    st.markdown("")
+    ca1,ca2,ca3,ca4 = st.columns(4)
+    with ca1:
+        ed = catalyst["earnings_date"]
+        st.metric("Next Earnings",str(ed) if ed else "N/A",
+                  f"{catalyst['days_to_earnings']}d away" if catalyst["days_to_earnings"] is not None else "")
+    ca2.metric("Event Risk",catalyst["event_risk"])
+    ca3.metric("Ex-Div",str(catalyst["ex_div_date"]) if catalyst["ex_div_date"] else "N/A")
+    at = catalyst["analyst_target"]
+    if at:
+        upside=(at-cur)/cur*100
+        ca4.metric("Analyst Target",f"${at:.2f}",f"{upside:+.1f}%")
+    else:
+        ca4.metric("Analyst Target","N/A")
+    st.divider()
 
-    tp1, tp2 = st.columns(2)
-    with tp1:
-        st.markdown("**Key Levels**")
+    # ── Two-column: Trade Plan + Key Metrics ──
+    st.markdown("### 📌 Trade Plan & Key Metrics")
+    tp_col, km_col = st.columns(2)
+
+    with tp_col:
+        s1,s2,s3,r1,r2,r3 = a["levels"]
+        pct_stop = (cur-a["stop_loss"])/cur*100 if cur>0 else 0
+        rr_label = f"{a['rr']:.2f}:1"
+        st.markdown('<div class="card card-accent-blue">', unsafe_allow_html=True)
+        st.markdown("**Trade Plan**")
         st.markdown(f"""
-| Level | Price |
-|---|---|
-| Support 20d | ${s20:.2f} |
-| Support 50d | ${s50:.2f} |
-| Support 200d | ${s200:.2f} |
-| Resistance 20d | ${r20:.2f} |
-| Resistance 50d | ${r50:.2f} |
-| Resistance 200d | ${r200:.2f} |
-""")
-    with tp2:
-        st.markdown("**Suggested Trade Plan**")
-        action_color = "#26a69a" if "breakout" in a["suggested_action"] or "pullback" in a["suggested_action"] else "#f5c842"
-        st.markdown(f"""
-- **Position Status:** {a['position_status']}
-- **Suggested Action:** <span style='color:{action_color};font-weight:bold'>{a['suggested_action'].upper()}</span>
-- **Entry Zone:** ${a['entry_low']:.2f} – ${a['entry_high']:.2f}
-- **Stop Loss:** ${a['stop_loss']:.2f}
-- **Target 1:** ${a['target_1']:.2f} (R:R {a['rr']:.1f}x)
-- **Target 2:** ${a['target_2']:.2f}
-- **Reason:** {a['trend_bias']} trend, RSI {a['rsi']:.0f}, Supertrend {'UP' if df.iloc[-1]['SupertrendDir'] == 'up' else 'DOWN'}, event risk {catalyst['event_risk']}
+<table class="trade-table">
+<tr><td>Entry Zone</td><td style="color:#d1d4dc">${a['entry_low']:.2f} – ${a['entry_high']:.2f}</td></tr>
+<tr><td>Stop Loss ({pct_stop:.1f}%)</td><td style="color:#ef5350">${a['stop_loss']:.2f}</td></tr>
+<tr><td>Target 1 (+{((a['target_1']-cur)/cur*100):.1f}%)</td><td style="color:#26a69a">${a['target_1']:.2f}</td></tr>
+<tr><td>Target 2 (+{((a['target_2']-cur)/cur*100):.1f}%)</td><td style="color:#26a69a">${a['target_2']:.2f}</td></tr>
+<tr><td>Risk/Reward</td><td style="color:{'#26a69a' if a['rr']>=2 else '#f5c842'}">{rr_label}</td></tr>
+<tr><td>Support S1</td><td>${s1:.2f}</td></tr>
+<tr><td>Support S2</td><td>${s2:.2f}</td></tr>
+<tr><td>Resistance R1</td><td>${r1:.2f}</td></tr>
+<tr><td>Resistance R2</td><td>${r2:.2f}</td></tr>
+</table>
 """, unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with km_col:
+        info_d = info or {}
+        rev_g  = (info_d.get("revenueGrowth") or 0)*100
+        eps_g  = (info_d.get("earningsGrowth") or 0)*100
+        inst   = (info_d.get("heldPercentInstitutions") or 0)*100
+        float_s= info_d.get("floatShares",0) or 0
+        vol_cur= float(df["Volume"].iloc[-1])
+        vol_avg= float(df["Vol_EMA20"].iloc[-1]) if "Vol_EMA20" in df.columns else vol_cur
+        vr     = vol_cur/vol_avg if vol_avg>0 else 1.0
+
+        def km_color(val, good, bad):
+            if val>=good: return "#26a69a"
+            if val<=bad:  return "#ef5350"
+            return "#f5c842"
+
+        st.markdown('<div class="card card-accent-gold">', unsafe_allow_html=True)
+        st.markdown("**Key Metrics**")
+        st.markdown(f"""
+<table class="trade-table">
+<tr><td>EPS Qtr Growth</td><td style="color:{km_color(eps_g,15,-5)}">{eps_g:.1f}%</td></tr>
+<tr><td>Revenue Growth</td><td style="color:{km_color(rev_g,15,0)}">{rev_g:.1f}%</td></tr>
+<tr><td>Gross Margin</td><td style="color:{km_color((info_d.get('grossMargins') or 0)*100,50,25)}">{(info_d.get('grossMargins') or 0)*100:.1f}%</td></tr>
+<tr><td>Net Margin</td><td style="color:{km_color((info_d.get('profitMargins') or 0)*100,15,0)}">{(info_d.get('profitMargins') or 0)*100:.1f}%</td></tr>
+<tr><td>Volume vs Avg</td><td style="color:{km_color(vr,1.3,0.7)}">{vr:.2f}x</td></tr>
+<tr><td>Institutional %</td><td style="color:{km_color(inst,65,30)}">{inst:.1f}%</td></tr>
+<tr><td>Float Shares</td><td>{fmt_large(float_s)}</td></tr>
+<tr><td>P/E (TTM)</td><td>{f"{info_d.get('trailingPE',0):.1f}x" if info_d.get('trailingPE') else 'N/A'}</td></tr>
+<tr><td>Fwd P/E</td><td>{f"{info_d.get('forwardPE',0):.1f}x" if info_d.get('forwardPE') else 'N/A'}</td></tr>
+</table>
+""", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
     st.divider()
 
-    # ── MULTI-TIMEFRAME CONFIRMATION ──────────────────────────
+    # ── MTF ──
     st.markdown("### 🕐 Multi-Timeframe Confirmation")
-
     align = mtf["alignment_score"]
-    align_color = "#26a69a" if align >= 65 else ("#f5c842" if align >= 45 else "#ef5350")
-    st.markdown(f"**Alignment Score:** <span style='color:{align_color};font-size:22px;font-weight:bold'>{align}/100</span>", unsafe_allow_html=True)
-
-    mta, mtb, mtc, mtd = st.columns(4)
-    mta.metric("Primary Bias",      mtf["primary_bias"])
-    mtb.metric("Confirmation",      mtf["confirmation"][:40] + "…" if len(mtf["confirmation"]) > 40 else mtf["confirmation"])
-    mtc.metric("Execution Trigger", mtf["trigger"][:40] + "…" if len(mtf["trigger"]) > 40 else mtf["trigger"])
-    mtd.metric("Conflict Note",     mtf["conflict_note"][:40] + "…" if len(mtf["conflict_note"]) > 40 else mtf["conflict_note"])
-
-    with st.expander("📋 Full Multi-Timeframe Table", expanded=False):
-        mtf_df = pd.DataFrame(mtf["rows"])
-        st.dataframe(mtf_df, use_container_width=True, hide_index=True)
-        st.caption(f"Primary Bias: **{mtf['primary_bias']}** · Trigger: {mtf['trigger']} · {mtf['conflict_note']}")
-
+    ac = "#26a69a" if align>=65 else ("#f5c842" if align>=45 else "#ef5350")
+    st.markdown(f"**Alignment:** <span style='color:{ac};font-size:22px;font-weight:700'>{align}/100</span> — {mtf['primary_bias']}",unsafe_allow_html=True)
+    ma,mb,mc,md = st.columns(4)
+    ma.metric("Bias",mtf["primary_bias"])
+    mb.metric("Trigger",mtf["trigger"][:38]+"…" if len(mtf["trigger"])>38 else mtf["trigger"])
+    mc.metric("Conflict",mtf["conflict_note"][:38]+"…" if len(mtf["conflict_note"])>38 else mtf["conflict_note"])
+    md.metric("Score",f"{align}/100")
+    with st.expander("📋 Full Timeframe Table",expanded=False):
+        st.dataframe(pd.DataFrame(mtf["rows"]),use_container_width=True,hide_index=True)
     st.divider()
 
-    # ── OPTIONS SETUP ─────────────────────────────────────────
+    # ── Options ──
     st.markdown("### 🎯 Options Setup")
-
-    opt_vehicle, opt_reason = options_recommendation(
-        a["trend_bias"], catalyst["event_risk"],
-        opt_data.get("iv"), a["rsi"], a["atr_pct"]
-    )
-
-    oa, ob, oc, od = st.columns(4)
-    oa.metric("Recommendation", opt_vehicle)
-    ob.metric("Next Expiry",    opt_data.get("next_exp") or "N/A")
-    oc.metric("IV (Median)",    f"{opt_data['iv']:.1f}%" if opt_data.get("iv") else "N/A")
-    od.metric("Event Risk",     catalyst["event_risk"])
-
+    opt_vehicle,opt_reason = options_recommendation(a["trend_bias"],catalyst["event_risk"],
+                                                    opt_data.get("iv"),a["rsi"],a["atr_pct"])
+    oa,ob,oc,od = st.columns(4)
+    oa.metric("Recommendation",opt_vehicle)
+    ob.metric("Next Expiry",opt_data.get("next_exp") or "N/A")
+    oc.metric("IV (Median)",f"{opt_data['iv']:.1f}%" if opt_data.get("iv") else "N/A")
+    od.metric("Event Risk",catalyst["event_risk"])
     st.info(f"**Reasoning:** {opt_reason}")
-
     if opt_data.get("error"):
-        st.caption(f"⚠️ Options data note: {opt_data['error']}")
-
+        st.caption(f"ℹ️ {opt_data['error']}")
     st.divider()
 
-    # ── AI COMMENTS (OpenRouter) ──────────────────────────────
-    st.markdown("### 🤖 AI Comments")
-
-    ai_payload = {
-        "ticker":          ticker,
-        "price":           a["price"],
-        "trend_bias":      a["trend_bias"],
-        "rsi":             a["rsi"],
-        "alignment_score": mtf["alignment_score"],
-        "primary_bias":    mtf["primary_bias"],
-        "event_risk":      catalyst["event_risk"],
-        "options_vehicle": opt_vehicle,
-        "entry_low":       a["entry_low"],
-        "entry_high":      a["entry_high"],
-        "stop_loss":       a["stop_loss"],
-        "target_1":        a["target_1"],
-        "target_2":        a["target_2"],
-        "rr":              a["rr"],
-        "iv":              opt_data.get("iv"),
-        "sentiment_label": sent_label,
-        "sentiment_score": sent_score,
-        "atr_pct":         a["atr_pct"],
-        "overall_score":   a["overall_score"],
-        "support":         a["support_watch"],
-        "resistance":      a["resistance_watch"],
-    }
-
-    effective_provider = st.session_state.get("ai_provider", "none")
-    if not st.session_state.get("ai_enabled", True):
-        effective_provider = "none"
-
-    if st.button("🤖 Generate AI Comments", key="gen_ai"):
-        with st.spinner("Generating analysis..."):
-            commentary, ai_warn = generate_ai_commentary(
-                ai_payload,
-                provider=effective_provider,
-                model=st.session_state.get("ai_model", "openrouter/auto")
-            )
-        if isinstance(commentary, tuple):
-            commentary, ai_warn = commentary
-
-        if ai_warn:
-            st.warning(ai_warn)
-
+    # ── AI Comments ──
+    st.markdown("### 🤖 Expert AI Analysis")
+    eff_prov = st.session_state.get("ai_provider","none")
+    if not st.session_state.get("ai_enabled",True): eff_prov="none"
+    if st.button("🤖 Generate Expert Analysis",key="gen_ai"):
+        with st.spinner("Generating expert analysis..."):
+            ai_payload = {
+                "ticker":ticker,"price":a["price"],"trend_bias":a["trend_bias"],
+                "rsi":a["rsi"],"alignment_score":mtf["alignment_score"],
+                "primary_bias":mtf["primary_bias"],"event_risk":catalyst["event_risk"],
+                "options_vehicle":opt_vehicle,"entry_low":a["entry_low"],"entry_high":a["entry_high"],
+                "stop_loss":a["stop_loss"],"target_1":a["target_1"],"target_2":a["target_2"],
+                "rr":a["rr"],"iv":opt_data.get("iv"),"sentiment_label":sent_label,
+                "sentiment_score":sent_score,"atr_pct":a["atr_pct"],"overall_score":a["overall_score"],
+                "support":a["support_watch"],"resistance":a["resistance_watch"],
+                "fund_score":a["fund_score"],"tech_score":a["tech_score"],
+                "rev_growth":a["rev_growth"],"eps_growth":a["eps_growth"],
+                "inst_pct":a["inst_pct"],"max_dd":a["max_dd"],
+                "ema9":a["ema9"],"ema20":a["ema20"],"ema50":a["ema50"],"ema200":a["ema200"],
+                "vwap":a["vwap"],"days_to_earnings":catalyst["days_to_earnings"],
+                "sector":a["sector"],
+            }
+            commentary,ai_warn = generate_ai_commentary(ai_payload,provider=eff_prov,
+                                                         model=st.session_state.get("ai_model","openrouter/auto"))
+        if ai_warn: st.warning(ai_warn)
         st.markdown('<div class="ai-box">', unsafe_allow_html=True)
         st.markdown(commentary)
         st.markdown('</div>', unsafe_allow_html=True)
     else:
-        if effective_provider == "none":
-            st.caption("Using Python-generated analysis (AI provider set to 'none'). Click the button to generate.")
-        else:
-            st.caption("Click the button above to generate AI commentary via OpenRouter.")
-
+        st.caption("Click the button above to generate comprehensive expert analysis.")
     st.divider()
 
-    # ── NEWS ──────────────────────────────────────────────────
-    col_sent, col_news = st.columns([1, 1])
-
-    with col_sent:
+    # ── News (scrollable, 20 items) ──
+    nc1,nc2 = st.columns([1,2])
+    with nc1:
         st.markdown("### 📊 Sentiment")
-        sent_color = "#26a69a" if sent_label == "Bullish" else ("#ef5350" if sent_label == "Bearish" else "#f5c842")
-        st.progress(sent_score / 100)
-        st.markdown(f"<span style='color:{sent_color};font-weight:bold'>Sentiment: {sent_label} ({sent_score}/100)</span>", unsafe_allow_html=True)
+        sc = "#26a69a" if sent_label=="Bullish" else ("#ef5350" if sent_label=="Bearish" else "#f5c842")
+        st.progress(sent_score/100)
+        st.markdown(f"<span style='color:{sc};font-weight:700;font-size:16px'>{sent_label} — {sent_score}/100</span>",unsafe_allow_html=True)
+        st.caption(f"Based on {len(news)} news items across multiple sources")
 
-    with col_news:
-        st.markdown("### 📰 Latest News")
-        for item in news[:5]:
-            with st.container(border=True):
-                st.markdown(f"**{item['title']}**")
-                if item["published"]:
-                    st.caption(item["published"])
-                st.markdown(f"[Read →]({item['link']})")
-
-    st.divider()
-
-    # ── RISK CALCULATOR (ENHANCED) ────────────────────────────
-    st.markdown("### 💰 Risk Calculator")
-    with st.expander("Open Position Sizer", expanded=False):
-        rca, rcb = st.columns(2)
-        with rca:
-            rc_account  = st.number_input("Account Size ($)", value=50000.0, step=1000.0, key="rc_acct")
-            rc_cash     = st.number_input("Cash Available ($)", value=16147.0, step=100.0, key="rc_cash")
-            rc_risk_pct = st.number_input("Risk Per Trade (%)", value=1.0, min_value=0.1, max_value=10.0, step=0.1, key="rc_riskpct")
-            rc_asset    = st.selectbox("Asset Type", ["Stock", "Option"], key="rc_asset")
-        with rcb:
-            rc_entry  = st.number_input("Entry Price ($)", value=float(f"{a['entry_high']:.2f}"), key="rc_entry")
-            rc_stop   = st.number_input("Stop Loss ($)",  value=float(f"{a['stop_loss']:.2f}"), key="rc_stop")
-            rc_t1     = st.number_input("Target 1 ($)",   value=float(f"{a['target_1']:.2f}"), key="rc_t1")
-            rc_t2     = st.number_input("Target 2 ($)",   value=float(f"{a['target_2']:.2f}"), key="rc_t2")
-
-        if st.button("Calculate Position Size", key="calc_pos"):
-            result, warning = calc_position_size(
-                rc_account, rc_cash, rc_risk_pct,
-                rc_entry, rc_stop, rc_t1, rc_t2,
-                rc_asset, a["atr"]
+    with nc2:
+        st.markdown(f"### 📰 Latest News ({len(news)} items)")
+        st.markdown('<div class="news-scroll">', unsafe_allow_html=True)
+        for item in news[:20]:
+            pub   = item.get("published","")[:16] if item.get("published") else ""
+            src   = item.get("source","")
+            title = item["title"]
+            # Inline sentiment
+            t_low  = title.lower()
+            bull   = sum(1 for w in BULL_WORDS if w in t_low)
+            bear   = sum(1 for w in BEAR_WORDS if w in t_low)
+            dot    = "🟢" if bull>bear else ("🔴" if bear>bull else "⚪")
+            st.markdown(
+                f'<div class="news-item">{dot} <a href="{item["link"]}" target="_blank" style="color:#7ab4ff;text-decoration:none;font-size:12px">{title}</a>'
+                f'<br><span style="color:#787b86;font-size:10px">{src} · {pub}</span></div>',
+                unsafe_allow_html=True
             )
-            if result is None:
-                st.error(warning)
+        st.markdown('</div>', unsafe_allow_html=True)
+    st.divider()
+
+    # ── Risk Calculator ──
+    st.markdown("### 💰 Position Sizer")
+    with st.expander("Open Position Sizer",expanded=False):
+        r1c,r2c = st.columns(2)
+        with r1c:
+            rc_acct  = st.number_input("Account Size ($)",value=50000.0,step=1000.0)
+            rc_cash  = st.number_input("Cash Available ($)",value=float(CASH_USD),step=100.0)
+            rc_riskp = st.number_input("Risk Per Trade (%)",value=1.0,min_value=0.1,max_value=5.0,step=0.1)
+            rc_asset = st.selectbox("Asset Type",["Stock","Option"])
+        with r2c:
+            rc_entry = st.number_input("Entry ($)",value=float(f"{a['entry_high']:.2f}"))
+            rc_stop  = st.number_input("Stop ($)", value=float(f"{a['stop_loss']:.2f}"))
+            rc_t1    = st.number_input("Target 1 ($)",value=float(f"{a['target_1']:.2f}"))
+            rc_t2    = st.number_input("Target 2 ($)",value=float(f"{a['target_2']:.2f}"))
+        if st.button("Calculate",key="calc_pos"):
+            res,warn = calc_position_size(rc_acct,rc_cash,rc_riskp,rc_entry,rc_stop,rc_t1,rc_t2,rc_asset,a["atr"])
+            if res is None: st.error(warn)
             else:
-                p1, p2, p3, p4, p5, p6 = st.columns(6)
-                p1.metric("Max $ Risk",    f"${result['max_risk_dollars']:,.2f}")
-                p2.metric(f"{rc_asset}s",  str(result["units"]) + " " + result["label_unit"])
-                p3.metric("Position Value",f"${result['pos_value']:,.2f}")
-                p4.metric("Risk/Unit",     f"${result['risk_per_unit']:.2f}")
-                p5.metric("R:R → T1",      f"{result['rr1']:.2f}x")
-                p6.metric("R:R → T2",      f"{result['rr2']:.2f}x")
-                if warning:
-                    st.warning(warning)
-
-                st.markdown("**📘 What these numbers mean:**")
-                for exp in result["explanations"]:
-                    st.markdown(exp)
-
-                st.session_state["last_position_calc"] = {
-                    "ticker": ticker, "entry": rc_entry, "stop": rc_stop,
-                    "target1": rc_t1, "target2": rc_t2, "size": result["units"],
-                    "asset_type": rc_asset, "rr1": result["rr1"],
-                }
-
+                p1,p2,p3,p4,p5,p6 = st.columns(6)
+                p1.metric("Max Risk",f"${res['max_risk']:,.2f}")
+                p2.metric(f"{rc_asset}s",f"{res['units']} {res['label_unit']}")
+                p3.metric("Position Value",f"${res['pos_value']:,.2f}")
+                p4.metric("Risk/Unit",f"${res['risk_per_unit']:.2f}")
+                p5.metric("R:R → T1",f"{res['rr1']:.2f}x")
+                p6.metric("R:R → T2",f"{res['rr2']:.2f}x")
+                if warn: st.warning(warn)
+                st.session_state["last_pos_calc"]={"ticker":ticker,"entry":rc_entry,"stop":rc_stop,
+                                                    "target1":rc_t1,"target2":rc_t2,"size":res["units"],"asset_type":rc_asset}
     st.divider()
 
-    # ── 6 PILLARS ─────────────────────────────────────────────
-    st.markdown("### 📐 6-Pillar Analysis")
+    # ── 6-Pillar Summary ──
+    st.markdown("### 📐 Analysis Scores")
+    scores = a["scores"]
+    cols6  = st.columns(6)
+    labels = ["Fundamentals","Technicals","Risk","Plan","Entry/Exit","Mindset"]
+    icons  = ["💼","📊","🛡️","📋","🎯","🧠"]
+    for i,(label,icon) in enumerate(zip(labels,icons)):
+        sc   = scores.get(label, scores.get(list(scores.keys())[i],3))
+        _,badge = score_badge(sc)
+        color   = "#26a69a" if sc>=3.5 else ("#f5c842" if sc>=2.5 else "#ef5350")
+        cols6[i].markdown(
+            f'<div class="card" style="text-align:center">'
+            f'<div style="font-size:20px">{icon}</div>'
+            f'<div style="color:#787b86;font-size:11px;margin:4px 0">{label}</div>'
+            f'<div style="color:{color};font-size:22px;font-weight:700">{sc:.1f}</div>'
+            f'</div>', unsafe_allow_html=True)
 
-    pillar_data = [
-        ("1. Fundamentals",     a["scores"]["Fundamentals"],    a["fund_summary"],  a["fund_why_weak"]),
-        ("2. Technicals",       a["scores"]["Technicals"],       a["tech_summary"],  a["tech_why_weak"]),
-        ("3. Risk Management",  a["scores"]["Risk Management"],  a["risk_full"],     a["risk_why_weak"]),
-        ("4. Trading Plan",     a["scores"]["Trading Plan"],     a["plan_summary"],  ""),
-        ("5. Entry / Exit",     a["scores"]["Entry/Exit"],       a["ee_summary"],    a["ee_why_weak"]),
-        ("6. Mindset",          a["scores"]["Mindset"],          a["mind_summary"],  ""),
-    ]
-
-    for title, score, summary, why_weak in pillar_data:
-        css_class, badge = score_badge(score)
-        with st.expander(f"{badge}  {title}  —  {score}/5", expanded=(score <= 2)):
-            st.markdown(summary)
-            if why_weak:
-                st.error(why_weak)
-
+    overall_color = "#26a69a" if a["overall_score"]>=3.5 else ("#f5c842" if a["overall_score"]>=2.5 else "#ef5350")
+    st.markdown(
+        f'<div style="background:#1e222d;border:1px solid #2a2e3e;border-radius:8px;padding:12px 18px;margin-top:8px">'
+        f'<span style="color:#787b86">Overall Score: </span>'
+        f'<span style="color:{overall_color};font-size:20px;font-weight:700">{a["overall_score"]:.1f}/5</span>'
+        f' &nbsp;|&nbsp; Trend: <strong>{a["trend_bias"]}</strong>'
+        f' &nbsp;|&nbsp; Entry: <strong>${a["entry_low"]:.2f}–${a["entry_high"]:.2f}</strong>'
+        f' &nbsp;|&nbsp; Stop: <strong style="color:#ef5350">${a["stop_loss"]:.2f}</strong>'
+        f' &nbsp;|&nbsp; T1: <strong style="color:#26a69a">${a["target_1"]:.2f}</strong>'
+        f' &nbsp;|&nbsp; R:R: <strong>{a["rr"]:.2f}x</strong>'
+        f'</div>', unsafe_allow_html=True)
     st.divider()
 
-    st.markdown("### 📊 Summary Table")
-    table_data = pd.DataFrame({
-        "Pillar": list(a["scores"].keys()),
-        "Score":  list(a["scores"].values()),
-        "Rating": [score_badge(v)[1] for v in a["scores"].values()],
-    })
-    st.dataframe(table_data, use_container_width=True, hide_index=True)
-
-    st.success(
-        f"**Overall:** {a['overall_score']}/5  |  "
-        f"**Trend:** {a['trend_bias']}  |  "
-        f"**Entry:** ${a['entry_low']:.2f}–${a['entry_high']:.2f}  |  "
-        f"**Stop:** ${a['stop_loss']:.2f}  |  "
-        f"**T1:** ${a['target_1']:.2f}  |  "
-        f"**T2:** ${a['target_2']:.2f}  |  "
-        f"**R:R:** {a['rr']:.1f}x"
-    )
-
-    st.divider()
-
-    # ── SAVE TO JOURNAL ───────────────────────────────────────
-    st.markdown("### 💾 Save Setup to Journal")
-    with st.expander("Save this setup as a trade entry", expanded=False):
-        j1, j2 = st.columns(2)
+    # ── Save to Journal ──
+    with st.expander("💾 Save Setup to Journal",expanded=False):
+        j1,j2 = st.columns(2)
         with j1:
-            j_direction  = st.selectbox("Direction", ["Long", "Short"], key="j_dir")
-            j_asset_type = st.selectbox("Asset Type", ["Stock", "Option", "Spread"], key="j_at")
-            j_thesis     = st.text_area("Trade Thesis", placeholder="Why are you taking this trade?", key="j_thesis")
-            j_timeframe  = st.selectbox("Primary Timeframe", ["1m","5m","15m","1h","4h","1d"], index=5, key="j_tf")
+            j_dir  = st.selectbox("Direction",["Long","Short"],key="j_dir")
+            j_at   = st.selectbox("Asset Type",["Stock","Option","Spread"],key="j_at")
+            j_th   = st.text_area("Thesis",key="j_th",placeholder="Why are you taking this trade?")
+            j_tf   = st.selectbox("Timeframe",["1m","5m","15m","1h","4h","1d"],index=5,key="j_tf")
         with j2:
-            j_result  = st.selectbox("Result (if closing)", ["Open","Win","Loss","Breakeven"], key="j_res")
-            j_pnl     = st.number_input("P&L ($)", value=0.0, key="j_pnl")
-            j_notes   = st.text_area("Notes", placeholder="What happened?", key="j_notes")
-            j_mistakes= st.text_area("Mistakes / Lessons", placeholder="What would you do differently?", key="j_mistakes")
+            j_res  = st.selectbox("Result",["Open","Win","Loss","Breakeven"],key="j_res")
+            j_pnl  = st.number_input("P&L ($)",value=0.0,key="j_pnl")
+            j_nt   = st.text_area("Notes",key="j_nt")
+            j_mis  = st.text_area("Mistakes/Lessons",key="j_mis")
+        lpc = st.session_state.get("last_pos_calc",{})
+        if st.button("💾 Save",key="save_j"):
+            save_trade({"date":datetime.now().strftime("%Y-%m-%d %H:%M"),"ticker":ticker,
+                        "direction":j_dir,"asset_type":j_at,"entry":lpc.get("entry",a["entry_high"]),
+                        "stop":lpc.get("stop",a["stop_loss"]),"target":lpc.get("target1",a["target_1"]),
+                        "size":lpc.get("size",""),"thesis":j_th,"timeframe":j_tf,
+                        "alignment_score":mtf["alignment_score"],"catalyst_state":catalyst["risk_label"],
+                        "options_setup":opt_vehicle,"result":j_res,"pnl":j_pnl,"notes":j_nt,"mistakes":j_mis})
+            st.success(f"✅ Saved: {ticker} {j_dir}")
 
-        lpc = st.session_state.get("last_position_calc", {})
 
-        if st.button("💾 Save to Journal", key="save_journal"):
-            trade_row = {
-                "date":            datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "ticker":          ticker,
-                "direction":       j_direction,
-                "asset_type":      j_asset_type,
-                "entry":           lpc.get("entry", a["entry_high"]),
-                "stop":            lpc.get("stop",  a["stop_loss"]),
-                "target":          lpc.get("target1", a["target_1"]),
-                "size":            lpc.get("size", ""),
-                "thesis":          j_thesis,
-                "timeframe":       j_timeframe,
-                "alignment_score": mtf["alignment_score"],
-                "catalyst_state":  catalyst["risk_label"],
-                "options_setup":   opt_vehicle,
-                "result":          j_result,
-                "pnl":             j_pnl,
-                "notes":           j_notes,
-                "mistakes":        j_mistakes,
-            }
-            save_trade(trade_row)
-            st.success(f"✅ Trade saved: {ticker} {j_direction} on {trade_row['date']}")
-
-# ═══════════════════════════════════════════════════════════════
-# PAGE 2: PORTFOLIO
-# ═══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
+#  PAGE 2: PORTFOLIO
+# ══════════════════════════════════════════════════════════════
 elif "💼" in page:
     st.markdown("## 💼 Portfolio")
 
     if "portfolio" not in st.session_state:
         st.session_state["portfolio"] = DEFAULT_PORTFOLIO.copy()
-
     portfolio = st.session_state["portfolio"]
 
-    with st.expander("➕ Add / Update Position"):
-        pa, pb, pc, pd_col, pe = st.columns(5)
-        with pa:   new_ticker = st.text_input("Ticker (exact, e.g. AVGO.NE)", key="new_tick").strip().upper()
-        with pb:   new_shares = st.number_input("Shares", min_value=0.0, key="new_shares")
-        with pc:   new_avg    = st.number_input("Avg Cost", min_value=0.0, key="new_avg")
-        with pd_col: new_cur  = st.selectbox("Currency", ["CAD", "USD"], key="new_cur")
-        with pe:   new_target = st.number_input("Target", min_value=0.0, key="new_target")
-        if st.button("Save Position") and new_ticker:
-            st.session_state["portfolio"][new_ticker] = {
-                "shares": new_shares, "avg_cost": new_avg,
-                "currency": new_cur, "target": new_target
-            }
-            st.success(f"Saved {new_ticker}")
-            st.rerun()
+    # ── Fetch live prices ──
+    total_invested = 0.0; total_value = 0.0; rows = []; alloc_labels = []; alloc_vals = []
+    today_pnl = 0.0
 
-    if portfolio:
-        remove_tick = st.selectbox("Remove Position", ["—"] + list(portfolio.keys()))
-        if st.button("Remove") and remove_tick != "—":
-            del st.session_state["portfolio"][remove_tick]
-            st.success(f"Removed {remove_tick}")
-            st.rerun()
-
-    st.divider()
-    st.markdown("### Current Positions")
-    st.caption("Prices fetched using exact ticker (e.g. AVGO.NE → NEO Exchange).")
-
-    total_invested = 0
-    total_value    = 0
-    rows           = []
-
-    for tick, pos in st.session_state["portfolio"].items():
-        cur_price = get_portfolio_price(tick)
-        if cur_price is None:
-            cur_price = pos["avg_cost"]
-
+    for tick, pos in portfolio.items():
+        cur_price, prev_price = get_portfolio_price(tick)
+        if cur_price is None: cur_price, prev_price = pos["avg_cost"], pos["avg_cost"]
+        if prev_price is None: prev_price = cur_price
         invested   = pos["shares"] * pos["avg_cost"]
         value      = pos["shares"] * cur_price
         pnl        = value - invested
-        pnl_pct    = pnl / invested * 100 if invested else 0
-        to_target  = ((pos["target"] - cur_price) / cur_price * 100) if pos["target"] and cur_price else 0
-
-        total_invested += invested
-        total_value    += value
-
-        rows.append({
-            "Ticker":    tick,
-            "Shares":    pos["shares"],
-            "Avg Cost":  f"${pos['avg_cost']:.4f}",
-            "Cur Price": f"${cur_price:.2f}",
-            "Value":     f"${value:,.2f}",
-            "P&L":       f"${pnl:+,.2f} ({pnl_pct:+.2f}%)",
-            "Target":    f"${pos['target']:.2f} (+{to_target:.1f}%)",
-            "Currency":  pos["currency"],
-        })
-
-    if rows:
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        pnl_pct    = pnl/invested*100 if invested else 0
+        today_chg  = (cur_price - prev_price) * pos["shares"]
+        today_pnl += today_chg
+        to_target  = (pos["target"]-cur_price)/cur_price*100 if pos["target"] and cur_price else 0
+        total_invested += invested; total_value += value
+        # Stop signal: 7% below avg cost
+        implied_stop = pos["avg_cost"] * 0.93
+        at_risk      = cur_price < implied_stop
+        rows.append({"Ticker":tick,"Shares":pos["shares"],"Avg Cost":f"${pos['avg_cost']:.4f}",
+                     "Price":f"${cur_price:.2f}","Value":f"${value:,.2f}",
+                     "P&L":f"${pnl:+,.2f} ({pnl_pct:+.2f}%)",
+                     "Today":f"${today_chg:+,.2f}",
+                     "Target":f"${pos['target']:.2f} (+{to_target:.1f}%)",
+                     "Currency":pos["currency"],"⚠️":"🔴 NEAR STOP" if at_risk else "✅"})
+        alloc_labels.append(tick); alloc_vals.append(value)
 
     total_pnl = total_value - total_invested
-    st.divider()
-    t1, t2, t3, t4 = st.columns(4)
-    t1.metric("Total Invested", f"${total_invested:,.2f}")
-    t2.metric("Total Value",    f"${total_value:,.2f}")
-    t3.metric("Total P&L",      f"${total_pnl:+,.2f}", f"{total_pnl/total_invested*100:+.2f}%" if total_invested else "0%")
-    t4.metric("Goal ($60k)",    f"{total_value/60000*100:.1f}%")
+    total_pnl_pct = total_pnl/total_invested*100 if total_invested else 0
+    cash_cad  = CASH_USD * CAD_RATE
+    grand_total = total_value + cash_cad
+    goal_mid  = (GOAL_LOW+GOAL_HIGH)/2
+
+    # ── TOP SECTION: Portfolio Overview ──
+    pv_col, td_col, at_col, gl_col = st.columns(4)
+    pv_color = "#26a69a" if total_pnl>=0 else "#ef5350"
+    td_color = "#26a69a" if today_pnl>=0 else "#ef5350"
+
+    pv_col.markdown(f"""<div class="card card-accent-blue" style="text-align:center">
+    <div style="color:#787b86;font-size:11px;text-transform:uppercase">Portfolio Value (CAD)</div>
+    <div style="font-size:28px;font-weight:700;color:#d1d4dc">${total_value:,.2f}</div>
+    <div style="color:#787b86;font-size:11px">+ ${cash_cad:,.0f} cash = <strong>${grand_total:,.0f}</strong></div>
+    </div>""", unsafe_allow_html=True)
+
+    td_col.markdown(f"""<div class="card" style="text-align:center">
+    <div style="color:#787b86;font-size:11px;text-transform:uppercase">Today's Return</div>
+    <div style="font-size:24px;font-weight:700;color:{td_color}">${today_pnl:+,.2f}</div>
+    </div>""", unsafe_allow_html=True)
+
+    at_col.markdown(f"""<div class="card" style="text-align:center">
+    <div style="color:#787b86;font-size:11px;text-transform:uppercase">All-Time Return</div>
+    <div style="font-size:24px;font-weight:700;color:{pv_color}">${total_pnl:+,.2f}</div>
+    <div style="color:{pv_color};font-size:13px">{total_pnl_pct:+.2f}%</div>
+    </div>""", unsafe_allow_html=True)
+
+    goal_pct = min(grand_total/GOAL_LOW*100, 100) if GOAL_LOW>0 else 0
+    gl_col.markdown(f"""<div class="card" style="text-align:center">
+    <div style="color:#787b86;font-size:11px;text-transform:uppercase">Goal Progress</div>
+    <div style="font-size:20px;font-weight:700;color:#2962ff">{goal_pct:.1f}%</div>
+    <div style="color:#787b86;font-size:11px">${grand_total:,.0f} / ${GOAL_LOW:,}</div>
+    </div>""", unsafe_allow_html=True)
+
+    # Goal progress bar
+    bar_w = min(100, goal_pct)
+    st.markdown(f"""
+    <div style="background:#1e222d;border-radius:6px;height:8px;margin:8px 0">
+    <div style="background:linear-gradient(90deg,#2962ff,#26a69a);width:{bar_w}%;height:8px;border-radius:6px"></div>
+    </div>
+    <div style="text-align:center;color:#787b86;font-size:11px">Goal: ${GOAL_LOW:,}–${GOAL_HIGH:,} CAD</div>
+    """, unsafe_allow_html=True)
 
     st.divider()
-    st.markdown("### Cash Reserve")
-    ca, cb = st.columns(2)
-    with ca: st.metric("USD Cash", "$16,147")
-    with cb: st.metric("Estimated CAD (×1.38)", f"${16147*1.38:,.0f}")
 
-# ═══════════════════════════════════════════════════════════════
-# PAGE 3: WATCHLIST
-# ═══════════════════════════════════════════════════════════════
-elif "👁️" in page:
-    st.markdown("## 👁️ Watchlist")
+    # ── Charts + Holdings ──
+    chart_col, hold_col = st.columns([1, 2])
+
+    with chart_col:
+        # Donut chart
+        alloc_vals_with_cash = alloc_vals + [cash_cad]
+        alloc_labels_with_cash = alloc_labels + ["Cash (CAD)"]
+        colors = ["#2962ff","#26a69a","#f5c842","#ef5350","#b388ff","#ff9800","#787b86"]
+        pie_fig = go.Figure(go.Pie(
+            labels=alloc_labels_with_cash,
+            values=alloc_vals_with_cash,
+            hole=0.55,
+            marker=dict(colors=colors[:len(alloc_vals_with_cash)],line=dict(color="#131722",width=2)),
+            textinfo="label+percent",
+            textfont=dict(size=11,color="#d1d4dc"),
+        ))
+        pie_fig.update_layout(
+            template="plotly_dark",paper_bgcolor="#1e222d",plot_bgcolor="#1e222d",
+            height=280,margin=dict(l=10,r=10,t=10,b=10),
+            showlegend=False,
+            annotations=[dict(text=f"${total_value:,.0f}",x=0.5,y=0.5,showarrow=False,
+                              font=dict(size=13,color="#d1d4dc"),align="center")],
+        )
+        st.plotly_chart(pie_fig,use_container_width=True,config={"displayModeBar":False})
+
+    with hold_col:
+        st.markdown("**Holdings**")
+        if rows:
+            st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+
+    # ── Stop-loss & Signal Alerts ──
+    st.divider()
+    st.markdown("### 🚨 Position Alerts & Signals")
+
+    alert_shown = False
+    for tick, pos in portfolio.items():
+        cur_price, _ = get_portfolio_price(tick)
+        if cur_price is None: cur_price = pos["avg_cost"]
+        implied_stop = pos["avg_cost"] * 0.93   # 7% stop
+        pnl_pct      = (cur_price-pos["avg_cost"])/pos["avg_cost"]*100
+        target_pct   = (pos["target"]-cur_price)/cur_price*100 if pos["target"] else 0
+
+        if cur_price < implied_stop:
+            st.markdown(f'<div class="signal-alert">🔴 <strong>{tick} STOP LOSS ALERT</strong> — Price ${cur_price:.2f} has breached 7% stop (${implied_stop:.2f}). Review position immediately.</div>',unsafe_allow_html=True)
+            alert_shown = True
+        elif pnl_pct < -5:
+            st.markdown(f'<div class="signal-alert">🟡 <strong>{tick} Warning</strong> — Down {pnl_pct:.1f}% from avg cost. Stop at ${implied_stop:.2f} ({7-abs(pnl_pct):.1f}% away).</div>',unsafe_allow_html=True)
+            alert_shown = True
+        elif pnl_pct > 15:
+            st.markdown(f'<div class="signal-good">✅ <strong>{tick} Target Progress</strong> — Up {pnl_pct:.1f}%. {target_pct:.1f}% to target ${pos["target"]:.2f}. Consider partial profit at T1.</div>',unsafe_allow_html=True)
+            alert_shown = True
+
+    if not alert_shown:
+        st.markdown('<div class="signal-good">✅ All positions within normal parameters. No stop-loss alerts.</div>',unsafe_allow_html=True)
+
+    st.divider()
+
+    # ── Add/Remove positions ──
+    with st.expander("➕ Manage Positions"):
+        pa,pb,pc,pd_c,pe = st.columns(5)
+        with pa: ntick = st.text_input("Ticker (e.g. AVGO.TO)",key="ntick").strip().upper()
+        with pb: nshar = st.number_input("Shares",min_value=0.0,key="nshar")
+        with pc: navg  = st.number_input("Avg Cost",min_value=0.0,key="navg")
+        with pd_c: ncur = st.selectbox("Currency",["CAD","USD"],key="ncur")
+        with pe: ntgt  = st.number_input("Target",min_value=0.0,key="ntgt")
+        if st.button("Save Position") and ntick:
+            st.session_state["portfolio"][ntick]={"shares":nshar,"avg_cost":navg,"currency":ncur,"target":ntgt}
+            st.success(f"Saved {ntick}"); st.rerun()
+        rm = st.selectbox("Remove",["—"]+list(portfolio.keys()))
+        if st.button("Remove") and rm!="—":
+            del st.session_state["portfolio"][rm]; st.success(f"Removed {rm}"); st.rerun()
+
+    st.divider()
+
+    # ── Cash ──
+    cx,cy = st.columns(2)
+    cx.metric("USD Cash Reserve",f"${CASH_USD:,.2f}")
+    cy.metric("CAD Equivalent (×1.38)",f"${cash_cad:,.0f}")
+
+    st.divider()
+
+    # ── AI STRATEGY SCANNER ──
+    st.markdown("### 🧠 AI Strategy Scanner")
+    st.caption("Scans your watchlist for the best setups and generates an AI portfolio strategy.")
 
     if "watchlist" not in st.session_state:
         st.session_state["watchlist"] = DEFAULT_WATCHLIST.copy()
 
-    wa, wb = st.columns([3, 1])
-    with wa: add_tick = st.text_input("Add ticker to watchlist").strip().upper()
-    with wb:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("Add") and add_tick and add_tick not in st.session_state["watchlist"]:
-            st.session_state["watchlist"].append(add_tick)
-            st.success(f"Added {add_tick}")
-            st.rerun()
+    scan_tickers = st.session_state["watchlist"][:12]
 
-    if st.session_state["watchlist"]:
-        remove_w = st.selectbox("Remove from watchlist", ["—"] + st.session_state["watchlist"])
-        if st.button("Remove from watchlist") and remove_w != "—":
-            st.session_state["watchlist"].remove(remove_w)
-            st.success(f"Removed {remove_w}")
-            st.rerun()
+    if st.button("🔍 Scan Watchlist & Generate Strategy",key="scan_strategy"):
+        watchlist_signals = []
+        with st.spinner(f"Scanning {len(scan_tickers)} watchlist stocks..."):
+            progress = st.progress(0)
+            for i,tick in enumerate(scan_tickers):
+                progress.progress((i+1)/len(scan_tickers))
+                df_w,info_w,err,_ = get_stock_data(tick,"1d")
+                if err or df_w is None or len(df_w)<20: continue
+                lat     = df_w.iloc[-1]
+                price_w = float(lat["Close"])
+                rsi_w   = float(lat["RSI"]) if "RSI" in df_w.columns else 50
+                st_dir  = str(lat["SupertrendDir"]) if "SupertrendDir" in df_w.columns else "down"
+                e20     = float(lat["EMA20"]) if "EMA20" in df_w.columns else price_w
+                e50     = float(lat["EMA50"]) if "EMA50" in df_w.columns else price_w
+                trend   = "Bullish" if price_w>e20>e50 else ("Bearish" if price_w<e20 else "Neutral")
+                cat_w   = get_catalyst_data(tick)
+                mtf_w   = get_mtf_data(tick)
+                alg     = mtf_w["alignment_score"]
+                # Signal quality
+                if st_dir=="up" and alg>=60 and rsi_w<70 and price_w>e20:
+                    sig = "🟢 BUY SETUP"
+                elif st_dir=="down" and alg<=40:
+                    sig = "🔴 AVOID"
+                else:
+                    sig = "🟡 WATCH"
+                watchlist_signals.append({"ticker":tick,"trend":trend,"rsi":rsi_w,
+                                           "st_dir":st_dir,"align":alg,"signal":sig,
+                                           "price":price_w,"ema20":e20})
+            progress.empty()
+
+        # Sort by alignment
+        watchlist_signals.sort(key=lambda x: x["align"], reverse=True)
+
+        # Display top setups
+        top3 = [s for s in watchlist_signals if s["signal"]=="🟢 BUY SETUP"][:4]
+        if top3:
+            st.markdown("#### 🟢 Top Watchlist Opportunities")
+            for s in top3:
+                pct_from_e20 = (s["price"]-s["ema20"])/s["ema20"]*100
+                st.markdown(
+                    f'<div class="signal-good">✅ <strong>{s["ticker"]}</strong> — '
+                    f'${s["price"]:.2f} | MTF Align: {s["align"]}/100 | RSI: {s["rsi"]:.0f} | '
+                    f'Trend: {s["trend"]} | ST: {s["st_dir"].upper()} | '
+                    f'{pct_from_e20:+.1f}% from EMA20 → Consider entry on pullback to ${s["ema20"]:.2f}</div>',
+                    unsafe_allow_html=True)
+
+        # Generate AI strategy
+        positions_with_price = {}
+        for tick, pos in portfolio.items():
+            cp, _ = get_portfolio_price(tick)
+            if cp is None: cp = pos["avg_cost"]
+            positions_with_price[tick] = {**pos, "current":cp,
+                                           "pnl_pct":(cp-pos["avg_cost"])/pos["avg_cost"]*100}
+
+        regime = get_market_regime()
+        eff_prov = st.session_state.get("ai_provider","none")
+        if not st.session_state.get("ai_enabled",True): eff_prov="none"
+
+        with st.spinner("Generating portfolio strategy..."):
+            strategy = generate_portfolio_strategy(positions_with_price, watchlist_signals, regime,
+                                                    provider=eff_prov,
+                                                    model=st.session_state.get("ai_model","openrouter/auto"))
+        st.markdown("#### 📋 AI Portfolio Strategy")
+        st.markdown('<div class="ai-box">', unsafe_allow_html=True)
+        st.markdown(strategy)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    else:
+        st.markdown('<div class="card" style="text-align:center;color:#787b86">'
+                    '🔍 Click the button above to scan your watchlist and get an AI-powered portfolio strategy based on current market conditions.'
+                    '</div>', unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════
+#  PAGE 3: WATCHLIST
+# ══════════════════════════════════════════════════════════════
+elif "👁️" in page:
+    st.markdown("## 👁️ Watchlist Scanner")
+
+    if "watchlist" not in st.session_state:
+        st.session_state["watchlist"] = DEFAULT_WATCHLIST.copy()
+
+    wa,wb = st.columns([3,1])
+    with wa: add_t = st.text_input("Add ticker").strip().upper()
+    with wb:
+        st.markdown("<br>",unsafe_allow_html=True)
+        if st.button("Add") and add_t and add_t not in st.session_state["watchlist"]:
+            st.session_state["watchlist"].append(add_t); st.success(f"Added {add_t}"); st.rerun()
+    rm_w = st.selectbox("Remove",["—"]+st.session_state["watchlist"])
+    if st.button("Remove from watchlist") and rm_w!="—":
+        st.session_state["watchlist"].remove(rm_w); st.rerun()
 
     st.divider()
-    st.markdown("### Live Scan")
-    st.caption("Click any ticker name to open it in Chart & Analysis.")
+    st.markdown("### 📡 Live Scan")
+    st.caption("Click any ticker to open in Chart & Analysis.")
 
     wl_rows = []
-    wl_catalyst_cache = {}
-
     for tick in st.session_state["watchlist"]:
-        df_w, info_w, _, _ = get_stock_data(tick, "1d")
-        if df_w is None or df_w.empty:
-            continue
-        latest_w = df_w.iloc[-1]
-        prev_w   = df_w.iloc[-2] if len(df_w) > 1 else latest_w
-        price_w  = float(latest_w["Close"])
-        chg_w    = (price_w - float(prev_w["Close"])) / float(prev_w["Close"]) * 100
-        rsi_w    = float(latest_w["RSI"]) if "RSI" in df_w.columns else 0
-        st_dir_w = str(latest_w["SupertrendDir"]) if "SupertrendDir" in df_w.columns else "—"
-        trend_w  = "▲ Bull" if price_w > float(latest_w.get("EMA50", price_w)) else "▼ Bear"
-        signal_w = "🟢 BUY" if (st_dir_w == "up" and rsi_w < 65) else ("🔴 SELL" if st_dir_w == "down" else "🟡 WAIT")
-
-        # Catalyst check (fast — reuse cached)
+        df_w,info_w,_,_ = get_stock_data(tick,"1d")
+        if df_w is None or df_w.empty: continue
+        lat   = df_w.iloc[-1]
+        prev  = df_w.iloc[-2] if len(df_w)>1 else lat
+        pw    = float(lat["Close"])
+        chg_w = (pw-float(prev["Close"]))/float(prev["Close"])*100
+        rsi_w = float(lat["RSI"]) if "RSI" in df_w.columns else 0
+        sd_w  = str(lat["SupertrendDir"]) if "SupertrendDir" in df_w.columns else "—"
+        e20_w = float(lat["EMA20"]) if "EMA20" in df_w.columns else pw
+        e50_w = float(lat["EMA50"]) if "EMA50" in df_w.columns else pw
+        trend_w="▲ Bull" if pw>e20_w>e50_w else ("▼ Bear" if pw<e50_w else "→ Neutral")
+        vol_w = float(lat["Volume"]); vol_avg_w = float(lat.get("Vol_EMA20",vol_w))
+        vr_w  = vol_w/vol_avg_w if vol_avg_w>0 else 1.0
+        # Multi-score for signal
+        bull_pts = 0
+        if pw>e20_w: bull_pts+=1
+        if pw>e50_w: bull_pts+=1
+        if sd_w=="up": bull_pts+=2
+        if rsi_w>50 and rsi_w<70: bull_pts+=1
+        if vr_w>1.2: bull_pts+=1
+        sig = "🟢 BUY" if bull_pts>=5 else ("🟡 WATCH" if bull_pts>=3 else "🔴 AVOID")
         try:
             cat_w = get_catalyst_data(tick)
-            days_earn = cat_w.get("days_to_earnings")
-        except Exception:
-            days_earn = None
-
-        # Generate note
-        note_w = generate_watchlist_note(tick, df_w, days_earn, rsi_w, st_dir_w, trend_w)
-
-        wl_rows.append({
-            "Ticker": tick,
-            "Price":  f"${price_w:.2f}",
-            "Chg%":   f"{chg_w:+.2f}%",
-            "RSI":    f"{rsi_w:.1f}",
-            "Trend":  trend_w,
-            "ST Dir": st_dir_w.upper(),
-            "Signal": signal_w,
-            "Note":   note_w,
-        })
+            if cat_w["days_to_earnings"] is not None and cat_w["days_to_earnings"]<=5:
+                sig = "⚠️ EARNINGS"
+        except Exception: pass
+        wl_rows.append({"ticker":tick,"price":pw,"chg":chg_w,"rsi":rsi_w,"trend":trend_w,
+                         "st":sd_w.upper(),"signal":sig,"vr":vr_w})
 
     if wl_rows:
-        # Display with clickable tickers using buttons
-        st.markdown("**Click a ticker to analyze it in Chart & Analysis:**")
-        header_cols = st.columns([1, 1, 1, 1, 1, 1, 1, 3])
-        for i, hdr in enumerate(["Ticker", "Price", "Chg%", "RSI", "Trend", "ST Dir", "Signal", "Note"]):
-            header_cols[i].markdown(f"**{hdr}**")
-
+        hdr = st.columns([1,1,1,1,1,1,1,1])
+        for i,h in enumerate(["Ticker","Price","Chg%","RSI","Trend","ST","Vol/Avg","Signal"]):
+            hdr[i].markdown(f"<span style='color:#787b86;font-size:11px;font-weight:700'>{h}</span>",unsafe_allow_html=True)
         for row in wl_rows:
-            c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([1, 1, 1, 1, 1, 1, 1, 3])
+            c1,c2,c3,c4,c5,c6,c7,c8 = st.columns([1,1,1,1,1,1,1,1])
             with c1:
-                if st.button(row["Ticker"], key=f"wl_tick_{row['Ticker']}"):
-                    st.session_state["ticker_input"] = row["Ticker"]
-                    st.session_state["page_override"] = "📈 Chart & Analysis"
+                if st.button(row["ticker"],key=f"wl_{row['ticker']}"):
+                    st.session_state["ticker_input"]=row["ticker"]
+                    st.session_state["page_override"]="📈 Chart & Analysis"
                     st.rerun()
-            c2.write(row["Price"])
-            # Color chg
-            chg_val = float(row["Chg%"].replace("%","").replace("+",""))
-            chg_color = "#26a69a" if chg_val >= 0 else "#ef5350"
-            c3.markdown(f"<span style='color:{chg_color}'>{row['Chg%']}</span>", unsafe_allow_html=True)
-            c4.write(row["RSI"])
-            c5.write(row["Trend"])
-            c6.write(row["ST Dir"])
-            c7.write(row["Signal"])
-            c8.write(row["Note"])
-    else:
-        st.info("Loading watchlist data...")
+            c2.write(f"${row['price']:.2f}")
+            chg_col = "#26a69a" if row["chg"]>=0 else "#ef5350"
+            c3.markdown(f"<span style='color:{chg_col}'>{row['chg']:+.2f}%</span>",unsafe_allow_html=True)
+            rsi_col = "#ef5350" if row["rsi"]>70 else ("#26a69a" if row["rsi"]<30 else "#d1d4dc")
+            c4.markdown(f"<span style='color:{rsi_col}'>{row['rsi']:.0f}</span>",unsafe_allow_html=True)
+            c5.write(row["trend"])
+            st_col = "#26a69a" if row["st"]=="UP" else "#ef5350"
+            c6.markdown(f"<span style='color:{st_col};font-weight:700'>{row['st']}</span>",unsafe_allow_html=True)
+            vr_col = "#26a69a" if row["vr"]>1.3 else ("#ef5350" if row["vr"]<0.7 else "#d1d4dc")
+            c7.markdown(f"<span style='color:{vr_col}'>{row['vr']:.2f}x</span>",unsafe_allow_html=True)
+            c8.write(row["signal"])
 
-# ═══════════════════════════════════════════════════════════════
-# PAGE 4: JOURNAL & PERFORMANCE
-# ═══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
+#  PAGE 4: JOURNAL
+# ══════════════════════════════════════════════════════════════
 elif "📓" in page:
     st.markdown("## 📓 Trade Journal & Performance")
-
-    journal_df = load_journal()
-    analytics  = journal_analytics(journal_df)
+    jdf = load_journal(); analytics = journal_analytics(jdf)
 
     if analytics:
-        st.markdown("### 📊 Performance Analytics")
-        ja1, ja2, ja3, ja4 = st.columns(4)
-        ja1.metric("Total Trades",   analytics["total"])
-        ja2.metric("Win Rate",       f"{analytics['win_rate']:.1f}%")
-        ja3.metric("Total P&L",      f"${analytics['total_pnl']:+,.2f}")
-        ja4.metric("Profit Factor",  f"{analytics['profit_factor']:.2f}x" if analytics['profit_factor'] != float('inf') else "∞")
+        st.markdown("### 📊 Performance Summary")
+        j1,j2,j3,j4 = st.columns(4)
+        j1.metric("Total Trades",analytics["total"])
+        wr_col = "#26a69a" if analytics["win_rate"]>=55 else ("#ef5350" if analytics["win_rate"]<40 else "#f5c842")
+        j2.metric("Win Rate",f"{analytics['win_rate']:.1f}%")
+        j3.metric("Total P&L",f"${analytics['total_pnl']:+,.2f}")
+        j4.metric("Profit Factor",f"{analytics['profit_factor']:.2f}x" if analytics['profit_factor']!=float("inf") else "∞")
+        jb,jc,jd,_ = st.columns(4)
+        jb.metric("Avg Win",f"${analytics['avg_win']:+,.2f}")
+        jc.metric("Avg Loss",f"${analytics['avg_loss']:+,.2f}")
+        jd.metric("Expectancy",f"${analytics['expectancy']:+,.2f}")
+        for ins in analytics.get("insights",[]): st.info(ins)
 
-        jb1, jb2, jb3, _ = st.columns(4)
-        jb1.metric("Avg Win",        f"${analytics['avg_win']:+,.2f}")
-        jb2.metric("Avg Loss",       f"${analytics['avg_loss']:+,.2f}")
-        jb3.metric("Expectancy",     f"${analytics['expectancy']:+,.2f}")
-
-        if analytics["insights"]:
-            st.markdown("#### 🔍 Automatic Insights")
-            for insight in analytics["insights"]:
-                st.info(insight)
-
-        if not journal_df.empty and "pnl" in journal_df.columns:
-            pnl_series = pd.to_numeric(journal_df["pnl"], errors="coerce").fillna(0)
-            cum_pnl    = pnl_series.cumsum()
-            if pnl_series.sum() != 0:
-                fig_pnl = go.Figure()
-                fig_pnl.add_trace(go.Bar(
-                    x=list(range(1, len(pnl_series)+1)),
-                    y=pnl_series.tolist(),
-                    marker_color=["#26a69a" if v >= 0 else "#ef5350" for v in pnl_series],
-                    name="P&L per Trade"
-                ))
-                fig_pnl.add_trace(go.Scatter(
-                    x=list(range(1, len(cum_pnl)+1)),
-                    y=cum_pnl.tolist(),
-                    mode="lines+markers",
-                    name="Cumulative P&L",
-                    line=dict(color="#2962ff", width=2),
-                    yaxis="y2"
-                ))
-                fig_pnl.update_layout(
-                    template="plotly_dark", plot_bgcolor="#131722", paper_bgcolor="#131722",
-                    height=280, margin=dict(l=10,r=10,t=30,b=10),
-                    title="P&L per Trade + Cumulative",
-                    font=dict(color="#d1d4dc"),
-                    yaxis2=dict(overlaying="y", side="right"),
-                )
-                st.plotly_chart(fig_pnl, use_container_width=True)
-
+        if not jdf.empty and "pnl" in jdf.columns:
+            pnl_s = pd.to_numeric(jdf["pnl"],errors="coerce").fillna(0)
+            if pnl_s.sum()!=0:
+                fig_p = go.Figure()
+                fig_p.add_trace(go.Bar(x=list(range(1,len(pnl_s)+1)),y=pnl_s.tolist(),
+                    marker_color=["#26a69a" if v>=0 else "#ef5350" for v in pnl_s],name="P&L"))
+                fig_p.add_trace(go.Scatter(x=list(range(1,len(pnl_s)+1)),y=pnl_s.cumsum().tolist(),
+                    mode="lines+markers",name="Cumulative",line=dict(color="#2962ff",width=2),yaxis="y2"))
+                fig_p.update_layout(template="plotly_dark",plot_bgcolor="#131722",paper_bgcolor="#131722",
+                    height=260,margin=dict(l=10,r=10,t=24,b=10),
+                    yaxis2=dict(overlaying="y",side="right"),font=dict(color="#d1d4dc"))
+                st.plotly_chart(fig_p,use_container_width=True)
         st.divider()
 
-    st.markdown("### ➕ Log New Trade")
-    with st.expander("Open Trade Entry Form", expanded=not analytics):
-        f1, f2 = st.columns(2)
-        with f1:
-            f_ticker    = st.text_input("Ticker", key="f_tick")
-            f_direction = st.selectbox("Direction", ["Long","Short"], key="f_dir")
-            f_asset     = st.selectbox("Asset Type", ["Stock","Option","Spread"], key="f_ast")
-            f_entry     = st.number_input("Entry ($)", value=0.0, key="f_ent")
-            f_stop      = st.number_input("Stop ($)",  value=0.0, key="f_stp")
-            f_target    = st.number_input("Target ($)", value=0.0, key="f_tgt")
-            f_size      = st.number_input("Size (shares/contracts)", value=0, key="f_sz")
-        with f2:
-            f_thesis    = st.text_area("Thesis", key="f_th")
-            f_tf        = st.selectbox("Timeframe", ["1m","5m","15m","1h","4h","1d"], index=5, key="f_tff")
-            f_align     = st.slider("Alignment Score (0–100)", 0, 100, 50, key="f_aln")
-            f_catalyst  = st.selectbox("Catalyst State", ["Low Risk","Moderate Risk","High Risk"], key="f_cat")
-            f_opt_setup = st.text_input("Options Setup Used", key="f_opt")
-            f_result    = st.selectbox("Result", ["Open","Win","Loss","Breakeven"], key="f_res")
-            f_pnl       = st.number_input("P&L ($)", value=0.0, key="f_pnl")
-            f_notes     = st.text_area("Notes", key="f_nt")
-            f_mistakes  = st.text_area("Mistakes / Lessons", key="f_mis")
-
-        if st.button("Save Trade", key="save_manual_trade"):
-            if f_ticker:
-                save_trade({
-                    "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    "ticker": f_ticker.upper(), "direction": f_direction,
-                    "asset_type": f_asset, "entry": f_entry, "stop": f_stop,
-                    "target": f_target, "size": f_size, "thesis": f_thesis,
-                    "timeframe": f_tf, "alignment_score": f_align,
-                    "catalyst_state": f_catalyst, "options_setup": f_opt_setup,
-                    "result": f_result, "pnl": f_pnl, "notes": f_notes,
-                    "mistakes": f_mistakes,
-                })
-                st.success("Trade logged!")
-                st.rerun()
-            else:
-                st.error("Please enter a ticker.")
+    st.markdown("### ➕ Log Trade")
+    with st.expander("Open Form",expanded=not analytics):
+        fa,fb = st.columns(2)
+        with fa:
+            ft    = st.text_input("Ticker",key="ft")
+            fd    = st.selectbox("Direction",["Long","Short"],key="fd")
+            fa_   = st.selectbox("Asset",["Stock","Option","Spread"],key="fa_")
+            fe    = st.number_input("Entry ($)",value=0.0,key="fe")
+            fs    = st.number_input("Stop ($)", value=0.0,key="fs")
+            fg    = st.number_input("Target ($)",value=0.0,key="fg")
+            fsz   = st.number_input("Size",value=0,key="fsz")
+        with fb:
+            fth   = st.text_area("Thesis",key="fth")
+            ftf   = st.selectbox("Timeframe",["1m","5m","15m","1h","4h","1d"],index=5,key="ftf")
+            faln  = st.slider("Alignment (0–100)",0,100,50,key="faln")
+            fcat  = st.selectbox("Catalyst State",["Low Risk","Moderate Risk","High Risk"],key="fcat")
+            fopt  = st.text_input("Options Setup",key="fopt")
+            fres  = st.selectbox("Result",["Open","Win","Loss","Breakeven"],key="fres")
+            fpnl  = st.number_input("P&L ($)",value=0.0,key="fpnl")
+            fnt   = st.text_area("Notes",key="fnt")
+            fmis  = st.text_area("Mistakes",key="fmis")
+        if st.button("💾 Save Trade",key="save_mt"):
+            if ft:
+                save_trade({"date":datetime.now().strftime("%Y-%m-%d %H:%M"),"ticker":ft.upper(),
+                            "direction":fd,"asset_type":fa_,"entry":fe,"stop":fs,"target":fg,
+                            "size":fsz,"thesis":fth,"timeframe":ftf,"alignment_score":faln,
+                            "catalyst_state":fcat,"options_setup":fopt,"result":fres,"pnl":fpnl,
+                            "notes":fnt,"mistakes":fmis})
+                st.success("Saved!"); st.rerun()
 
     st.divider()
-
     st.markdown("### 📋 Trade Log")
-    if journal_df.empty:
-        st.info("No trades logged yet. Use the form above or the 'Save to Journal' button on the Chart page.")
+    if jdf.empty:
+        st.info("No trades yet. Use the form above or save from the Chart page.")
     else:
-        st.dataframe(journal_df, use_container_width=True, hide_index=True)
-        csv_str = journal_df.to_csv(index=False)
-        st.download_button("⬇ Download Journal CSV", data=csv_str,
-                           file_name="trade_journal.csv", mime="text/csv")
-
-        if st.button("🗑 Delete Last Trade", key="del_last"):
-            if not journal_df.empty:
-                journal_df = journal_df.iloc[:-1]
-                journal_df.to_csv(JOURNAL_FILE, index=False)
-                st.success("Last trade deleted.")
-                st.rerun()
+        st.dataframe(jdf,use_container_width=True,hide_index=True)
+        st.download_button("⬇ Download CSV",data=jdf.to_csv(index=False),
+                           file_name="trade_journal.csv",mime="text/csv")
+        if st.button("🗑 Delete Last Trade"):
+            jdf = jdf.iloc[:-1]; jdf.to_csv(JOURNAL_FILE,index=False)
+            st.success("Deleted."); st.rerun()
